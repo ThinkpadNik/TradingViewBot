@@ -163,7 +163,10 @@ async def send_telegram_message(request: Request, text: str) -> None:
         delay = float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt
         await asyncio.sleep(delay)
 
-
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+    
 @app.post("/webhook")
 async def receive_webhook(
     request: Request,
