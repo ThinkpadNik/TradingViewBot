@@ -58,7 +58,7 @@ Pisz zwięźle, konkretnie, profesjonalnie.
 
     try:
         response = client.models.generate_content(
-            model='models/gemini-1.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
         )
         ai_analysis = response.text
