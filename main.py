@@ -47,7 +47,8 @@ class LiquidityLevels(BaseModel):
 class TradingViewPayload(BaseModel):
     """Strict contract for the JSON produced by the Pine Script alert."""
 
-    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True, populate_by_name=True)
+    webhook_secret: Optional[str] = Field(default=None, alias="secret", exclude=True, min_length=1, max_length=200)
     event_id: Optional[str] = Field(default=None, min_length=1, max_length=160)
     bar_time: Optional[int] = Field(default=None, ge=0)
     ticker: str = Field(default="UNKNOWN", min_length=1, max_length=80)
@@ -175,7 +176,7 @@ async def receive_webhook(
     secret: Annotated[Optional[str], Query()] = None,
     x_webhook_secret: Annotated[Optional[str], Header()] = None,
 ):
-    provided_secret = x_webhook_secret or secret or ""
+    provided_secret = x_webhook_secret or secret or payload.webhook_secret or ""
     if not WEBHOOK_SECRET or not secrets.compare_digest(provided_secret, WEBHOOK_SECRET):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook secret")
 
