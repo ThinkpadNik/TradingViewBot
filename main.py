@@ -119,8 +119,8 @@ async def generate_analysis(payload: TradingViewPayload) -> SignalAnalysis:
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=SignalAnalysis,
-            temperature=0.2,
-            max_output_tokens=500,
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            max_output_tokens=1024,
         ),
     )
     if not response.text:
