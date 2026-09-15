@@ -66,7 +66,7 @@ class SignalAnalysis(BaseModel):
     market_bias: Literal["long_watchlist", "short_watchlist", "neutral", "avoid"]
     signal_quality_score: int = Field(ge=1, le=100)
     confidence: Literal["low", "medium", "high"]
-    invalidation_sl: Optional[FiniteFloat] = Field(default=None, gt=0)
+    invalidation_sl: Optional[FiniteFloat] = Field(default=None, ge=0)
     targets: list[FiniteFloat] = Field(default_factory=list, max_length=2)
     risk_reward: Optional[FiniteFloat] = Field(default=None, ge=0)
     key_warnings: list[str] = Field(default_factory=list, max_length=4)
