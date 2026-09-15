@@ -1,5 +1,6 @@
 import asyncio
 import html
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-
+logger = logging.getLogger(__name__)
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -182,8 +183,10 @@ async def receive_webhook(
         analysis = await generate_analysis(payload)
         await send_telegram_message(request, render_telegram(payload, analysis))
     except httpx.HTTPError as exc:
+        logger.exception("Telegram delivery failed for event_id=%s", payload.event_id)
         raise HTTPException(status_code=502, detail="Telegram delivery failed") from exc
     except Exception as exc:
+        logger.exception("Gemini analysis failed for event_id=%s", payload.event_id)
         raise HTTPException(status_code=502, detail="Signal analysis failed") from exc
 
     return {"status": "success", "event_id": payload.event_id, "ticker": payload.ticker}
