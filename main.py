@@ -32,6 +32,10 @@ class Momentum(BaseModel):
 class TrendContext(BaseModel):
     model_config = ConfigDict(extra="ignore")
     trend_bias: Optional[str] = Field(default=None, max_length=32)
+    higher_timeframe: Optional[str] = Field(default=None, max_length=16)
+    higher_trend_bias: Optional[str] = Field(default=None, max_length=32)
+    higher_ema50: Optional[FiniteFloat] = Field(default=None, gt=0)
+    higher_ema200: Optional[FiniteFloat] = Field(default=None, gt=0)
     ema50: Optional[FiniteFloat] = Field(default=None, gt=0)
     ema200: Optional[FiniteFloat] = Field(default=None, gt=0)
     atr: Optional[FiniteFloat] = Field(default=None, gt=0)
@@ -120,7 +124,9 @@ def make_prompt(payload: TradingViewPayload) -> str:
 Nie wymyślaj poziomów ani danych, których nie ma w wejściu. To narzędzie analityczne,
 nie rekomendacja inwestycyjna. Jeżeli setup nie ma potwierdzenia, ustaw bias na avoid
 lub neutral i opisz ryzyko. Invalidation musi wynikać ze swingów lub ATR; TP muszą
-wynikać z dostępnych poziomów strukturalnych.
+wynikać z dostępnych poziomów strukturalnych. "higher_trend_bias" opisuje trend
+nadrzędny, a "trend_bias" trend interwału wejściowego; podaj ostrzeżenie, jeżeli
+którykolwiek z nich nie wspiera sygnału.
 
 WEJŚCIE:
 {payload.model_dump_json()}
@@ -235,6 +241,8 @@ def render_telegram(payload: TradingViewPayload, analysis: SignalAnalysis) -> st
         f"<b>Sygnał:</b> <code>{html.escape(payload.signal_type or 'brak')}</code> | <b>Płynność:</b> <code>{html.escape(payload.liquidity_event or 'brak')}</code>\n"
         f"<b>Wynik:</b> <code>{analysis.signal_quality_score}/100</code> | <b>Bias:</b> <code>{analysis.market_bias}</code>\n"
         f"<b>Pewność:</b> <code>{analysis.confidence}</code> | <b>Plan:</b> <code>{direction_label}</code>\n\n"
+        f"<b>Trend nadrzędny:</b> <code>{html.escape(payload.trend_context.higher_trend_bias or 'brak')}</code>"
+        f" | <b>TF trendu:</b> <code>{html.escape(format_timeframe(payload.trend_context.higher_timeframe or 'brak'))}</code>\n\n"
         f"<b>Invalidation SL:</b> <code>{price(plan.invalidation_sl)}</code>\n"
         f"<b>Ryzyko do SL:</b> <code>{price(plan.risk)}</code>\n"
         f"{tp_lines}\n\n"
