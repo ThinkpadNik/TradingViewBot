@@ -11,7 +11,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,72 @@ class LiquidityLevels(BaseModel):
     htf_prev_low: Optional[FiniteFloat] = Field(default=None, gt=0)
 
 
+class OscillatorSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rsi14: Optional[FiniteFloat] = Field(default=None, ge=0, le=100)
+    rsi100: Optional[FiniteFloat] = Field(default=None, ge=0, le=100)
+    stoch_k: Optional[FiniteFloat] = Field(default=None, ge=0, le=100)
+    stoch_d: Optional[FiniteFloat] = Field(default=None, ge=0, le=100)
+
+
+class ClosedSnapshot(OscillatorSnapshot):
+    # Epoch milliseconds. Null means unavailable, never a fabricated zero.
+    open_time: Optional[int] = Field(default=None, ge=0)
+    close_time: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_clock(self):
+        if (self.open_time is None) != (self.close_time is None):
+            raise ValueError("Snapshot needs both timestamps or neither")
+        if self.close_time is not None and self.close_time <= self.open_time:
+            raise ValueError("Snapshot close must follow open")
+        if self.close_time is None and any(
+            getattr(self, key) is not None for key in ("rsi14", "rsi100", "stoch_k", "stoch_d")
+        ):
+            raise ValueError("Snapshot values require timestamps")
+        return self
+
+
+class MTFContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    h1: ClosedSnapshot
+    h2: ClosedSnapshot
+    h4: ClosedSnapshot
+    h12: ClosedSnapshot
+    d1: ClosedSnapshot
+    w1: ClosedSnapshot
+
+
+class EventOHLCV(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    open: FiniteFloat = Field(gt=0)
+    high: FiniteFloat = Field(gt=0)
+    low: FiniteFloat = Field(gt=0)
+    close: FiniteFloat = Field(gt=0)
+    volume: Optional[FiniteFloat] = Field(default=None, ge=0)
+    atr14: Optional[FiniteFloat] = Field(default=None, ge=0)
+    rvol20: Optional[FiniteFloat] = Field(default=None, ge=0)
+    clv: Optional[FiniteFloat] = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
+            raise ValueError("OHLC prices are outside the candle range")
+        return self
+
+
+class StructuralScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["BULLISH_RECLAIM", "BEARISH_RECLAIM"]
+    pool: FiniteFloat = Field(gt=0)
+    invalidation: FiniteFloat = Field(gt=0)
+    sweep_depth_atr: Optional[FiniteFloat] = Field(default=None, ge=0)
+    reclaim_bars: int = Field(ge=1, le=5)
+    divergence: str = Field(max_length=64)
+    stoch_state: str = Field(max_length=64)
+    warning: str = Field(max_length=100)
+
+
 class TradingViewPayload(BaseModel):
     """Strict contract for the JSON produced by the Pine Script alert."""
 
@@ -65,6 +131,36 @@ class TradingViewPayload(BaseModel):
     momentum: Momentum = Field(default_factory=Momentum)
     trend_context: TrendContext = Field(default_factory=TrendContext)
     liquidity_levels: LiquidityLevels = Field(default_factory=LiquidityLevels)
+    payload_schema: Optional[Literal["nikosolution_analyst_v2"]] = Field(default=None, alias="schema")
+    script_version: Optional[str] = Field(default=None, max_length=24)
+    event_time: Optional[int] = Field(default=None, ge=0)
+    event_close_time: Optional[int] = Field(default=None, ge=0)
+    chart_timeframe: Optional[str] = Field(default=None, max_length=16)
+    mode: Optional[str] = Field(default=None, max_length=64)
+    ohlcv: Optional[EventOHLCV] = None
+    oscillators: Optional[OscillatorSnapshot] = None
+    scenario: Optional[StructuralScenario] = None
+    mtf: Optional[MTFContext] = None
+
+    @model_validator(mode="after")
+    def validate_mtf_contract(self):
+        if self.payload_schema is None:
+            if any(x is not None for x in (self.mtf, self.ohlcv, self.scenario)):
+                raise ValueError("Extended payload requires a versioned schema")
+            return self  # Preserve existing legacy alerts.
+        required = (self.event_id, self.bar_time, self.event_time, self.event_close_time,
+                    self.close, self.mtf, self.ohlcv, self.scenario, self.oscillators)
+        if any(x is None for x in required):
+            raise ValueError("Incomplete analyst v2 payload")
+        if self.bar_time != self.event_time or self.event_close_time <= self.event_time:
+            raise ValueError("Inconsistent event timestamps")
+        if self.close != self.ohlcv.close or self.signal_type != self.scenario.type:
+            raise ValueError("Legacy and extended event fields disagree")
+        for name in type(self.mtf).model_fields:
+            snapshot = getattr(self.mtf, name)
+            if snapshot.close_time is not None and snapshot.close_time > self.event_close_time:
+                raise ValueError("MTF snapshot contains future data")
+        return self
 
 
 class SignalAnalysis(BaseModel):
@@ -128,8 +224,22 @@ wynikać z dostępnych poziomów strukturalnych. "higher_trend_bias" opisuje tre
 nadrzędny, a "trend_bias" trend interwału wejściowego; podaj ostrzeżenie, jeżeli
 którykolwiek z nich nie wspiera sygnału.
 
+Dla schema=nikosolution_analyst_v2 analizuj jawnie mtf.h1, h2, h4, h12, d1 i w1.
+To migawki ostatnich dostępnych zamkniętych świec, a nie historia ich przebiegu.
+Porównaj RSI14 do RSI100 oraz Stoch K/D pomiędzy interwałami; opisz zgodność,
+konflikty i brakujące dane. Nie wnioskuj o kierunku zmian, przecięciu ani dywergencji
+z pojedynczej migawki. Pole scenario.divergence dotyczy tylko interwału zdarzenia;
+RSI jest próbkowane na potwierdzonych pivotach ceny, nie ma osobnych pivotów RSI.
+event_time to otwarcie świecy, event_close_time to czas poznania zdarzenia.
+open_time/close_time to czas źródłowej świecy każdego interwału, w milisekundach UTC.
+Jeżeli migawka nie ma czasu lub wartości, zaznacz brak danych; nie uzupełniaj ich.
+Poziomy sweepu to przybliżenie na podstawie OHLC, nie obserwacja zleceń stop.
+Uwzględnij OHLCV, ATR, RVOL, CLV, głębokość sweepu i czas reclaimu z JSON.
+Nie traktuj wyniku jakości 1–100 jako skalibrowanego prawdopodobieństwa sukcesu.
+Nie twierdź, że masz dostęp do wykresu, świeżych cen lub niewysłanych interwałów.
+
 WEJŚCIE:
-{payload.model_dump_json()}
+{payload.model_dump_json(by_alias=True, exclude_none=True)}
 """
 
 
@@ -237,6 +347,7 @@ def render_telegram(payload: TradingViewPayload, analysis: SignalAnalysis) -> st
     direction_label = {"long": "LONG", "short": "SHORT"}.get(plan.direction, "BRAK")
     return (
         f"🚨 <b>SYGNAŁ SMC I MOMENTUM {html.escape(payload.ticker)}</b>\n\n"
+        f"<b>ID zdarzenia:</b> <code>{html.escape(payload.event_id or 'brak')}</code>\n"
         f"<b>Cena:</b> <code>{price(payload.close)}</code> | <b>TF:</b> <code>{html.escape(format_timeframe(payload.timeframe))}</code>\n"
         f"<b>Sygnał:</b> <code>{html.escape(payload.signal_type or 'brak')}</code> | <b>Płynność:</b> <code>{html.escape(payload.liquidity_event or 'brak')}</code>\n"
         f"<b>Wynik:</b> <code>{analysis.signal_quality_score}/100</code> | <b>Bias:</b> <code>{analysis.market_bias}</code>\n"
