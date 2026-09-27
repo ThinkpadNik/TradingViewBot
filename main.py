@@ -15,7 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 logger = logging.getLogger(__name__)
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-pro-preview")
+# Pro supports low/medium/high, not the Flash-only minimal setting.
+THINKING_LEVEL = "low"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -206,6 +208,9 @@ def require_settings() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     require_settings()
+    logging.getLogger("uvicorn.error").info(
+        "Gemini configured: model=%s thinking=%s", MODEL_NAME, THINKING_LEVEL
+    )
     app.state.telegram_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0))
     yield
     await app.state.telegram_client.aclose()
@@ -250,7 +255,7 @@ async def generate_analysis(payload: TradingViewPayload) -> SignalAnalysis:
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=SignalAnalysis,
-            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL),
             max_output_tokens=1024,
         ),
     )
