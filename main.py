@@ -3,15 +3,22 @@ import html
 import logging
 import os
 import secrets
-from contextlib import asynccontextmanager
+import sqlite3
+from pathlib import Path
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Annotated, Literal, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from relay_store import RelayStore, EventConflict, QueueFull
+from relay_worker import RelayWorker, DeliveryRetry, DeliveryUnknown, DeliveryRejected
+from relay_health import readiness
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +29,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+RELAY_DB_PATH = os.getenv("RELAY_DB_PATH")
+RELAY_WORKER_ENABLED = os.getenv("RELAY_WORKER_ENABLED", "true").lower() == "true"
 
 
 class Momentum(BaseModel):
@@ -203,6 +212,12 @@ def require_settings() -> None:
     ]
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+    if not RELAY_DB_PATH or not Path(RELAY_DB_PATH).is_absolute():
+        raise RuntimeError("RELAY_DB_PATH must be an absolute path on persistent storage")
+    if os.getenv("RENDER"):
+        mount = Path(os.getenv("RELAY_DURABLE_DIR", "/var/data"))
+        if not os.path.ismount(mount) or not Path(RELAY_DB_PATH).resolve().is_relative_to(mount.resolve()):
+            raise RuntimeError("Relay requires a mounted persistent disk, not Render ephemeral storage")
 
 
 @asynccontextmanager
@@ -212,12 +227,37 @@ async def lifespan(app: FastAPI):
         "Gemini configured: model=%s thinking=%s", MODEL_NAME, THINKING_LEVEL
     )
     app.state.telegram_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0))
-    yield
-    await app.state.telegram_client.aclose()
+    app.state.relay_store = RelayStore(RELAY_DB_PATH)
+
+    async def analyze_job(data, model):
+        payload = TradingViewPayload.model_validate(data)
+        analysis = await generate_analysis(payload, model=model)
+        return analysis.model_dump(), render_telegram(payload, analysis)
+
+    async def deliver_job(text):
+        return await post_telegram(app.state.telegram_client, text)
+
+    app.state.relay_worker = RelayWorker(app.state.relay_store, analyze_job, deliver_job)
+    task = asyncio.create_task(app.state.relay_worker.run()) if RELAY_WORKER_ENABLED else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await app.state.telegram_client.aclose()
 
 
 app = FastAPI(title="TradingView AI Signal Engine", lifespan=lifespan)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request, exc):
+    # FastAPI's default error body can echo invalid secret values or input bodies.
+    return JSONResponse(status_code=422, content={"detail": "Invalid payload",
+        "errors": [{"loc": list(e["loc"]), "type": e["type"]} for e in exc.errors()]})
 
 
 def make_prompt(payload: TradingViewPayload) -> str:
@@ -235,7 +275,8 @@ Porównaj RSI14 do RSI100 oraz Stoch K/D pomiędzy interwałami; opisz zgodnoś�
 konflikty i brakujące dane. Nie wnioskuj o kierunku zmian, przecięciu ani dywergencji
 z pojedynczej migawki. Pole scenario.divergence dotyczy tylko interwału zdarzenia;
 RSI jest próbkowane na potwierdzonych pivotach ceny, nie ma osobnych pivotów RSI.
-event_time to otwarcie świecy, event_close_time to czas poznania zdarzenia.
+event_time to otwarcie świecy, event_close_time to planowany czas jej zamknięcia.
+Nie utożsamiaj event_close_time z czasem wykonania skryptu lub dostarczenia wiadomości.
 open_time/close_time to czas źródłowej świecy każdego interwału, w milisekundach UTC.
 Jeżeli migawka nie ma czasu lub wartości, zaznacz brak danych; nie uzupełniaj ich.
 Poziomy sweepu to przybliżenie na podstawie OHLC, nie obserwacja zleceń stop.
@@ -248,9 +289,9 @@ WEJŚCIE:
 """
 
 
-async def generate_analysis(payload: TradingViewPayload) -> SignalAnalysis:
+async def generate_analysis(payload: TradingViewPayload, *, model=None) -> SignalAnalysis:
     response = await ai_client.aio.models.generate_content(
-        model=MODEL_NAME,
+        model=model or MODEL_NAME,
         contents=make_prompt(payload),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -367,43 +408,90 @@ def render_telegram(payload: TradingViewPayload, analysis: SignalAnalysis) -> st
     )
 
 
-async def send_telegram_message(request: Request, text: str) -> None:
+async def post_telegram(client: httpx.AsyncClient, text: str) -> int:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
-    client: httpx.AsyncClient = request.app.state.telegram_client
-
-    for attempt in range(3):
+    try:
         response = await client.post(url, json=payload)
-        if response.status_code != 429 and response.status_code < 500:
-            response.raise_for_status()
-            return
-        if attempt == 2:
-            response.raise_for_status()
-        retry_after = response.headers.get("Retry-After")
-        delay = float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt
-        await asyncio.sleep(delay)
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+        raise DeliveryRetry("TELEGRAM_NOT_CONNECTED", 30) from None
+    except httpx.HTTPError:
+        raise DeliveryUnknown("request may have reached Telegram") from None
+    try:
+        data = response.json()
+    except ValueError:
+        raise DeliveryUnknown("invalid confirmation") from None
+    if not isinstance(data, dict):
+        raise DeliveryUnknown("invalid confirmation")
+    if response.status_code == 429 and data.get("ok") is False:
+        delay = (data.get("parameters") or {}).get("retry_after", 30)
+        try:
+            delay = float(delay)
+        except (TypeError, ValueError):
+            delay = 30
+        raise DeliveryRetry("TELEGRAM_RATE_LIMIT", delay)
+    if 400 <= response.status_code < 500 and data.get("ok") is False:
+        raise DeliveryRejected("explicit API rejection")
+    message_id = (data.get("result") or {}).get("message_id") if isinstance(data.get("result"), dict) else None
+    if response.status_code != 200 or data.get("ok") is not True or type(message_id) is not int or message_id <= 0:
+        raise DeliveryUnknown("missing positive confirmation")
+    return message_id
+
+
+async def send_telegram_message(request: Request, text: str) -> int:
+    return await post_telegram(request.app.state.telegram_client, text)
 
 
 @app.post("/webhook")
 async def receive_webhook(
     request: Request,
     payload: TradingViewPayload,
-    secret: Annotated[Optional[str], Query()] = None,
     x_webhook_secret: Annotated[Optional[str], Header()] = None,
 ):
-    provided_secret = x_webhook_secret or secret or payload.webhook_secret or ""
+    # URLs can reach proxy/access logs before application code runs.
+    # Existing Pine body authentication and header authentication stay supported.
+    if "secret" in request.query_params:
+        raise HTTPException(status_code=400, detail="Use body or header authentication, not URL credentials")
+    provided_secret = x_webhook_secret or payload.webhook_secret or ""
     if not WEBHOOK_SECRET or not secrets.compare_digest(provided_secret, WEBHOOK_SECRET):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook secret")
 
     try:
-        analysis = await generate_analysis(payload)
-        await send_telegram_message(request, render_telegram(payload, analysis))
-    except httpx.HTTPError as exc:
-        logger.exception("Telegram delivery failed for event_id=%s", payload.event_id)
-        raise HTTPException(status_code=502, detail="Telegram delivery failed") from exc
-    except Exception as exc:
-        # Logujemy klasę i traceback błędu, ale nigdy sekret ani pełny payload.
-        logger.exception("Gemini analysis failed for event_id=%s", payload.event_id)
-        raise HTTPException(status_code=502, detail="Signal analysis failed") from exc
+        job, inserted = await asyncio.to_thread(request.app.state.relay_store.enqueue,
+            payload.model_dump(by_alias=True, exclude_none=True), MODEL_NAME)
+    except EventConflict:
+        raise HTTPException(status_code=409, detail="Event ID content conflict") from None
+    except (QueueFull, sqlite3.Error, OSError):
+        raise HTTPException(status_code=503, detail="Durable inbox unavailable") from None
+    # This confirms committed receipt, NOT successful analysis or delivery.
+    return {"status": "accepted" if inserted else "duplicate", "event_id": job["event_id"],
+            "ticker": payload.ticker, "receipt_id": job["event_key"]}
 
-    return {"status": "success", "event_id": payload.event_id, "ticker": payload.ticker}
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "running", "relay_version": "durable-v1"}
+
+
+@app.get("/readyz")
+async def readyz(request: Request):
+    # Monitor this separately; do not use unresolved incidents as a restart loop.
+    try:
+        store = request.app.state.relay_store
+        worker = request.app.state.relay_worker
+        summary = await asyncio.to_thread(store.status)
+        result = readiness(summary, enabled=RELAY_WORKER_ENABLED,
+                           worker_error=worker.last_error,
+                           last_heartbeat=worker.last_heartbeat, now=store.clock())
+    except (sqlite3.Error, OSError):
+        result = {"status": "attention_required", "reasons": ["STORAGE_UNAVAILABLE"]}
+    return JSONResponse(status_code=200 if result["status"] == "ready" else 503, content=result)
+
+
+@app.get("/relay/status")
+async def relay_status(request: Request, x_webhook_secret: Annotated[Optional[str], Header()] = None):
+    if not WEBHOOK_SECRET or not secrets.compare_digest(x_webhook_secret or "", WEBHOOK_SECRET):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    summary = await asyncio.to_thread(request.app.state.relay_store.status)
+    return {**summary, "worker_enabled": RELAY_WORKER_ENABLED,
+            "worker_error": request.app.state.relay_worker.last_error}
