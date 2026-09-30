@@ -179,8 +179,21 @@ class RelayStore:
             blocks = [dict(r) for r in db.execute("SELECT * FROM relay_control")]
             oldest = db.execute("SELECT MIN(received_at) FROM relay_events WHERE status IN ('QUEUED','ANALYZING','READY','SENDING')").fetchone()[0]
             attention = [dict(r) for r in db.execute("""SELECT event_key AS receipt_id,
-                event_id,status,error_code,updated_at FROM relay_events
-                WHERE status IN ('DELIVERY_UNKNOWN','DELIVERY_FAILED')
+                event_id,status,result_kind,error_code,updated_at FROM relay_events
+                WHERE status IN ('DELIVERY_UNKNOWN','DELIVERY_FAILED') OR result_kind='TECHNICAL_ERROR'
                 ORDER BY updated_at,event_key LIMIT 20""")]
+            result_counts = {r[0]: r[1] for r in db.execute("""SELECT result_kind,COUNT(*)
+                FROM relay_events WHERE result_kind IS NOT NULL GROUP BY result_kind""")}
+            # Outcome of the newest RECEIVED event with a completed analysis,
+            # per model; not the last operation to finish. A delayed old success
+            # must not hide a newer event's failure. History remains in attention.
+            latest_analysis = [dict(r) for r in db.execute("""SELECT e.model,e.result_kind,
+                e.error_code,e.event_key AS receipt_id FROM relay_events e
+                WHERE e.ai_attempts>0 AND e.result_kind IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM relay_events newer WHERE newer.model=e.model
+                    AND newer.ai_attempts>0 AND newer.result_kind IS NOT NULL
+                    AND (newer.received_at,newer.event_key)>(e.received_at,e.event_key))
+                ORDER BY e.model""")]
             return {"counts": counts, "model_blocks": blocks, "oldest_pending_at": oldest,
-                    "attention": attention}
+                    "attention": attention, "result_counts": result_counts,
+                    "latest_analysis": latest_analysis}

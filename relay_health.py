@@ -11,6 +11,8 @@ def readiness(summary, *, enabled, worker_error, last_heartbeat, now):
         reasons.append("WORKER_ERROR")
     if summary["model_blocks"]:
         reasons.append("MODEL_BLOCKED")
+    if any(r["result_kind"] == "TECHNICAL_ERROR" for r in summary.get("latest_analysis", [])):
+        reasons.append("LATEST_ANALYSIS_FAILED")
     for state in ("DELIVERY_UNKNOWN", "DELIVERY_FAILED"):
         if summary["counts"].get(state, 0):
             reasons.append(state)

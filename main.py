@@ -1,5 +1,6 @@
 import asyncio
 import html
+import json
 import logging
 import os
 import secrets
@@ -15,9 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 from relay_store import RelayStore, EventConflict, QueueFull
-from relay_worker import RelayWorker, DeliveryRetry, DeliveryUnknown, DeliveryRejected
+from relay_worker import RelayWorker, DeliveryRetry, DeliveryUnknown, DeliveryRejected, AnalysisFailure
 from relay_health import readiness
 
 
@@ -232,7 +233,13 @@ async def lifespan(app: FastAPI):
     async def analyze_job(data, model):
         payload = TradingViewPayload.model_validate(data)
         analysis = await generate_analysis(payload, model=model)
-        return analysis.model_dump(), render_telegram(payload, analysis)
+        try:
+            text = render_telegram(payload, analysis)
+        except Exception:
+            # A local formatting bug is not a provider outage. Do not expose
+            # exception text or repeat an already completed paid generation.
+            raise AnalysisFailure("TELEGRAM_FORMAT_FAILED") from None
+        return analysis.model_dump(), text
 
     async def deliver_job(text):
         return await post_telegram(app.state.telegram_client, text)
@@ -300,9 +307,30 @@ async def generate_analysis(payload: TradingViewPayload, *, model=None) -> Signa
             max_output_tokens=1024,
         ),
     )
+    # Only allow-listed finish codes and integer usage counters reach logs.
+    # Never log response.text, prompt, exception repr, or validation input.
+    reasons = [getattr(c.finish_reason, "value", c.finish_reason)
+               for c in (getattr(response, "candidates", None) or [])]
+    known = {"STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "OTHER",
+             "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "MALFORMED_FUNCTION_CALL"}
+    safe_reasons = [r if isinstance(r, str) and r in known else "OTHER" for r in reasons]
+    usage = getattr(response, "usage_metadata", None)
+    metadata = {name: value if type(value) is int and value >= 0 else None
+                for name in ("prompt_token_count", "candidates_token_count",
+                             "thoughts_token_count", "total_token_count")
+                for value in (getattr(usage, name, None),)}
+    logging.getLogger("uvicorn.error").info(
+        "GEMINI_RESPONSE_METADATA %s", json.dumps({"finish_reasons": safe_reasons, **metadata}))
+    if "MAX_TOKENS" in safe_reasons:
+        raise AnalysisFailure("GEMINI_MAX_TOKENS")
+    if safe_reasons and any(r != "STOP" for r in safe_reasons):
+        raise AnalysisFailure("GEMINI_FINISH_NOT_STOP")
     if not response.text:
-        raise RuntimeError("Gemini returned an empty response")
-    return SignalAnalysis.model_validate_json(response.text)
+        raise AnalysisFailure("GEMINI_EMPTY_RESPONSE")
+    try:
+        return SignalAnalysis.model_validate_json(response.text)
+    except ValidationError:
+        raise AnalysisFailure("GEMINI_INVALID_RESPONSE") from None
 
 
 def price(value: Optional[float]) -> str:

@@ -10,6 +10,17 @@ from relay_store import canonical
 logger = logging.getLogger(__name__)
 
 
+class AnalysisFailure(Exception):
+    """Allow-listed operational codes, never provider text or model output."""
+    CODES = frozenset({"GEMINI_MAX_TOKENS", "GEMINI_EMPTY_RESPONSE",
+                       "GEMINI_INVALID_RESPONSE", "GEMINI_FINISH_NOT_STOP",
+                       "TELEGRAM_MESSAGE_TOO_LONG", "TELEGRAM_FORMAT_FAILED"})
+
+    def __init__(self, code):
+        self.code = code if code in self.CODES else "GEMINI_ANALYSIS_FAILED"
+        super().__init__(self.code)
+
+
 class DeliveryRetry(Exception):
     def __init__(self, code, delay=30):
         self.code, self.delay = code, max(1, min(float(delay), 86400))
@@ -25,6 +36,8 @@ class DeliveryRejected(Exception):
 
 def ai_failure(exc):
     """Classify without logging provider text, which may contain input or keys."""
+    if isinstance(exc, AnalysisFailure):
+        return "fail", exc.code
     code = getattr(exc, "code", None)
     try:
         code = int(code) if code is not None else None
@@ -96,9 +109,11 @@ class RelayWorker:
             analysis, text = await asyncio.wait_for(self.analyze(p, job["model"]), timeout=90)
             text = audit_header(job) + text
             if len(text) > 4000:
-                raise ValueError("Telegram content too long")
+                raise AnalysisFailure("TELEGRAM_MESSAGE_TOO_LONG")
         except Exception as exc:
             action, code = ai_failure(exc)
+            logger.error("RELAY_ANALYSIS_FAILURE receipt_id=%s code=%s action=%s",
+                         job["event_key"], code, action)
             if action == "block":
                 await self.db(self.store.block_model, job["model"], code)
             if action == "retry" and job["ai_attempts"] < 3:
