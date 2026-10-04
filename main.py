@@ -20,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError,
 from relay_store import RelayStore, EventConflict, QueueFull
 from relay_worker import RelayWorker, DeliveryRetry, DeliveryUnknown, DeliveryRejected, AnalysisFailure
 from relay_health import readiness
+from ops_alarm.ops_monitor import OpsConfig, OpsStore, OpsWorker
+from ops_alarm.ops_monitor_api import make_router
 
 
 logger = logging.getLogger(__name__)
@@ -221,9 +223,45 @@ def require_settings() -> None:
             raise RuntimeError("Relay requires a mounted persistent disk, not Render ephemeral storage")
 
 
+
+def prepare_ops_alarm(app):
+    """Optional alarm startup cannot stop the market Relay."""
+    app.state.ops_monitor_config = None
+    app.state.ops_monitor_store = None
+    app.state.ops_monitor_worker = None
+    app.state.ops_monitor_status = {"enabled": False, "reason": "OPS_MONITOR_DISABLED"}
+    if os.getenv("OPS_MONITOR_ENABLED", "false").lower() != "true":
+        return None
+    try:
+        relay_path = Path(RELAY_DB_PATH).resolve()
+        config = OpsConfig(
+            secret=os.getenv("OPS_MONITOR_SECRET", ""),
+            production_checks=frozenset(filter(None, os.getenv("OPS_MONITOR_CHECK_ID", "").split(","))),
+            test_checks=frozenset(filter(None, os.getenv("OPS_MONITOR_TEST_CHECK_ID", "").split(","))),
+            durable_dir=relay_path.parent,
+            forbidden_secrets=(WEBHOOK_SECRET or "", TELEGRAM_BOT_TOKEN or ""),
+            protected_databases=(relay_path,),
+        )
+    except Exception:
+        app.state.ops_monitor_status = {"enabled": False, "reason": "OPS_CONFIGURATION_INVALID"}
+        logger.warning("OPS_MONITOR_DISABLED reason=OPS_CONFIGURATION_INVALID")
+        return None
+    try:
+        ops_path = config.durable_dir / "ops_monitor.sqlite3"
+        if (ops_path.resolve() == relay_path or
+                (ops_path.exists() and relay_path.exists() and ops_path.samefile(relay_path))):
+            raise RuntimeError("OPS_STORAGE_INVALID")
+        store = OpsStore(config)
+    except Exception:
+        app.state.ops_monitor_status = {"enabled": False, "reason": "OPS_STORAGE_UNAVAILABLE"}
+        logger.warning("OPS_MONITOR_DISABLED reason=OPS_STORAGE_UNAVAILABLE")
+        return None
+    return config, store
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     require_settings()
+    ops_prepared = prepare_ops_alarm(app)
     logging.getLogger("uvicorn.error").info(
         "Gemini configured: model=%s thinking=%s", MODEL_NAME, THINKING_LEVEL
     )
@@ -246,9 +284,49 @@ async def lifespan(app: FastAPI):
 
     app.state.relay_worker = RelayWorker(app.state.relay_store, analyze_job, deliver_job)
     task = asyncio.create_task(app.state.relay_worker.run()) if RELAY_WORKER_ENABLED else None
+    ops_task = None
+    ops_run = None
+    ops_stopping = False
+    if ops_prepared is not None:
+        ops_config, ops_store = ops_prepared
+        try:
+            async def deliver_ops(text):
+                return await post_telegram(app.state.telegram_client, text)
+            ops_worker = OpsWorker(ops_store, deliver_ops,
+                retry_error=DeliveryRetry, rejection_error=DeliveryRejected)
+            ops_run = ops_worker.run()
+            ops_task = asyncio.create_task(ops_run)
+        except Exception:
+            if ops_run is not None and ops_task is None:
+                with suppress(Exception):
+                    ops_run.close()
+            app.state.ops_monitor_status = {"enabled": False, "reason": "OPS_WORKER_UNAVAILABLE"}
+            logger.warning("OPS_MONITOR_DISABLED reason=OPS_WORKER_UNAVAILABLE")
+        else:
+            app.state.ops_monitor_store = ops_store
+            app.state.ops_monitor_worker = ops_worker
+            app.state.ops_monitor_config = ops_config
+            app.state.ops_monitor_status = {"enabled": True, "reason": None}
+
+            def ops_finished(completed):
+                # Retrieve the result without exposing exception/provider text.
+                with suppress(asyncio.CancelledError, Exception):
+                    completed.exception()
+                if not ops_stopping and app.state.ops_monitor_worker is ops_worker:
+                    app.state.ops_monitor_config = None
+                    app.state.ops_monitor_status = {"enabled": False, "reason": "OPS_WORKER_UNAVAILABLE"}
+                    logger.warning("OPS_MONITOR_DISABLED reason=OPS_WORKER_UNAVAILABLE")
+
+            ops_task.add_done_callback(ops_finished)
     try:
         yield
     finally:
+        ops_stopping = True
+        app.state.ops_monitor_config = None
+        if ops_task:
+            ops_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await ops_task
         if task:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -257,6 +335,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TradingView AI Signal Engine", lifespan=lifespan)
+app.include_router(make_router())
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
