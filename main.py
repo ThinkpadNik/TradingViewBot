@@ -304,7 +304,9 @@ async def generate_analysis(payload: TradingViewPayload, *, model=None) -> Signa
             response_mime_type="application/json",
             response_schema=SignalAnalysis,
             thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL),
-            max_output_tokens=1024,
+            # Gemini shares this cap between thinking and the final JSON.
+            # Keep a finite budget without adding retries for truncated output.
+            max_output_tokens=4096,
         ),
     )
     # Only allow-listed finish codes and integer usage counters reach logs.
