@@ -9,20 +9,27 @@ type Props = {
   onClose: () => void;
 };
 
+type SubmitApiResponse =
+  | { success: true; submissionId: string; message: string }
+  | { success: false; error: string };
+
 export function QualificationForm({ content, open, onClose }: Props) {
   const formId = useId();
   const [step, setStep] = useState(1);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [pkg, setPkg] = useState<"response" | "guardian">("response");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
-  const { form, packages } = content;
+  const { form, packages, market } = content;
+  const fileName = file?.name ?? null;
 
   function setAnswer(id: string, value: string) {
     setAnswers((prev) => ({ ...prev, [id]: value }));
@@ -30,7 +37,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
 
   function validateStep(current: number): boolean {
     setError(null);
-    if (current === 1 && !fileName) {
+    if (current === 1 && !file) {
       setError("Dodaj zdjęcie lub PDF dokumentu, aby przejść dalej.");
       return false;
     }
@@ -61,21 +68,63 @@ export function QualificationForm({ content, open, onClose }: Props) {
     setStep((s) => Math.max(1, s - 1));
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!validateStep(3)) return;
-    // Smoke-test: capture intent locally; payment gateway wires in later stage
-    setSubmitted(true);
+    if (!validateStep(3) || !file || isSubmitting) return;
+
+    const formData = new FormData();
+    formData.append("market", market);
+    formData.append("packageType", pkg);
+    formData.append("email", email.trim());
+    formData.append("phone", phone.trim());
+    formData.append("customAnswers", JSON.stringify(answers));
+    formData.append("file", file);
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        body: formData,
+      });
+
+      let data: SubmitApiResponse | null = null;
+      try {
+        data = (await res.json()) as SubmitApiResponse;
+      } catch {
+        setError("Serwer zwrócił nieprawidłową odpowiedź. Spróbuj ponownie.");
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        const message =
+          data && "error" in data && data.error
+            ? data.error
+            : "Nie udało się zapisać zgłoszenia. Spróbuj ponownie.";
+        setError(message);
+        return;
+      }
+
+      setSubmissionId(data.submissionId);
+      setSubmitted(true);
+    } catch {
+      setError("Błąd połączenia z serwerem. Sprawdź sieć i spróbuj ponownie.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function resetAndClose() {
     setStep(1);
-    setFileName(null);
+    setFile(null);
     setPkg("response");
     setAnswers({});
     setEmail("");
     setPhone("");
     setSubmitted(false);
+    setSubmissionId(null);
+    setIsSubmitting(false);
     setError(null);
     onClose();
   }
@@ -102,7 +151,8 @@ export function QualificationForm({ content, open, onClose }: Props) {
           <button
             type="button"
             onClick={resetAndClose}
-            className="text-sm font-medium text-[var(--ink-soft)]/70 underline-offset-2 hover:text-[var(--ink)] hover:underline"
+            disabled={isSubmitting}
+            className="text-sm font-medium text-[var(--ink-soft)]/70 underline-offset-2 hover:text-[var(--ink)] hover:underline disabled:opacity-50"
           >
             Zamknij
           </button>
@@ -136,6 +186,12 @@ export function QualificationForm({ content, open, onClose }: Props) {
               </strong>
               .
             </p>
+            {submissionId && (
+              <p className="mt-3 text-xs text-[var(--ink-soft)]/70">
+                Numer zgłoszenia:{" "}
+                <span className="font-mono font-medium text-[var(--ink)]">{submissionId}</span>
+              </p>
+            )}
             <button
               type="button"
               onClick={resetAndClose}
@@ -147,7 +203,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
             {step === 1 && (
-              <fieldset className="space-y-4">
+              <fieldset className="space-y-4" disabled={isSubmitting}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step1.title}
                 </legend>
@@ -157,8 +213,8 @@ export function QualificationForm({ content, open, onClose }: Props) {
                     accept="image/*,.pdf,application/pdf"
                     className="sr-only"
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      setFileName(f ? f.name : null);
+                      const f = e.target.files?.[0] ?? null;
+                      setFile(f);
                       setError(null);
                     }}
                   />
@@ -176,7 +232,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
             )}
 
             {step === 2 && (
-              <fieldset className="space-y-5">
+              <fieldset className="space-y-5" disabled={isSubmitting}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step2.title}
                 </legend>
@@ -248,7 +304,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
             )}
 
             {step === 3 && (
-              <fieldset className="space-y-5">
+              <fieldset className="space-y-5" disabled={isSubmitting}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step3.title}
                 </legend>
@@ -345,7 +401,8 @@ export function QualificationForm({ content, open, onClose }: Props) {
                 <button
                   type="button"
                   onClick={back}
-                  className="px-4 py-2.5 text-sm font-semibold text-[var(--ink-soft)] underline-offset-2 hover:underline"
+                  disabled={isSubmitting}
+                  className="px-4 py-2.5 text-sm font-semibold text-[var(--ink-soft)] underline-offset-2 hover:underline disabled:opacity-50"
                 >
                   Wstecz
                 </button>
@@ -354,16 +411,18 @@ export function QualificationForm({ content, open, onClose }: Props) {
                 <button
                   type="button"
                   onClick={next}
-                  className="bg-[var(--ink)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--ink-soft)]"
+                  disabled={isSubmitting}
+                  className="bg-[var(--ink)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--ink-soft)] disabled:opacity-50"
                 >
                   Dalej
                 </button>
               ) : (
                 <button
                   type="submit"
-                  className="bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
+                  disabled={isSubmitting}
+                  className="bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {form.step3.payCta}
+                  {isSubmitting ? "Wysyłanie…" : form.step3.payCta}
                 </button>
               )}
             </div>

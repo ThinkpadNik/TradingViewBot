@@ -78,9 +78,12 @@ Design: fjord/ink (`--ink`, `--fjord`, `--accent`), bez fioletu / cream+terracot
 
 ## Zachowanie formularza (stan obecny)
 
-- Submit **nie** woła jeszcze API ani bramki płatności — zapisuje intencję lokalnie i pokazuje ekran „Zgłoszenie zapisane”.
+- Submit woła **`POST /api/submit`** (`FormData`: `market`, `packageType`, `email`, `phone`, `customAnswers` JSON, `file`).
+- Route: `src/app/api/submit/route.ts` — walidacja 400, log diagnostyczny (rynek/pakiet/nazwa/rozmiar), sukces `{ success: true, submissionId: 'sub_…', message }`.
+- Formularz: stany `isSubmitting`, błędy serwera, ekran sukcesu z `submissionId`.
 - CTA ustawia `#zamowienie` i scrolluje do sekcji.
-- Walidacja: brak pliku na kroku 1, puste pola kwalifikacji, niepoprawny e-mail.
+- Walidacja UI: brak pliku na kroku 1, puste pola kwalifikacji, niepoprawny e-mail.
+- Bramka płatności (Vipps/BLIK/karta) — nadal kolejny etap.
 
 ---
 
@@ -98,7 +101,7 @@ Design: fjord/ink (`--ink`, `--fjord`, `--accent`), bez fioletu / cream+terracot
 
 Priorytet pod smoke test 48h:
 
-1. **Backend zgłoszeń** — API `POST` (plik + pola kwalifikacji + pakiet + kontakt); storage bezpieczny; e-mail potwierdzenia.
+1. ~~**Backend zgłoszeń** — API `POST /api/submit`~~ (zrobione w ETAP 2; brak trwałego storage / e-maila potwierdzenia).
 2. **Płatności**
    - NO: Karta / Vipps  
    - PL: BLIK / Karta  
