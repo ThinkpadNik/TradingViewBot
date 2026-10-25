@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# pilot storage (ETAP 3) — keep directories, ignore contents
+/uploads/*
+!/uploads/.gitkeep
+/data/*
+!/data/.gitkeep

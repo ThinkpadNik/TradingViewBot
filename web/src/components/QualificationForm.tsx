@@ -10,7 +10,27 @@ type Props = {
 };
 
 type SubmitApiResponse =
-  | { success: true; submissionId: string; message: string }
+  | {
+      success: true;
+      submissionId: string;
+      message: string;
+      amountLabel: string;
+      currency: "PLN" | "NOK";
+      paymentMethods: { id: string; label: string }[];
+    }
+  | { success: false; error: string };
+
+type CheckoutApiResponse =
+  | {
+      success: true;
+      mode: "stripe" | "pilot_mock";
+      submissionId: string;
+      amountLabel: string;
+      currency: "PLN" | "NOK";
+      paymentMethods: { id: string; label: string }[];
+      checkoutUrl: string;
+      sessionId?: string;
+    }
   | { success: false; error: string };
 
 export function QualificationForm({ content, open, onClose }: Props) {
@@ -21,15 +41,23 @@ export function QualificationForm({ content, open, onClose }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [submitted, setSubmitted] = useState(false);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [amountLabel, setAmountLabel] = useState<string | null>(null);
+  const [paymentMethods, setPaymentMethods] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [preferredMethod, setPreferredMethod] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
   const { form, packages, market } = content;
   const fileName = file?.name ?? null;
+  const progressStep = step === 4 ? 4 : step;
+  const progressLabel =
+    step === 4 ? "płatność" : step === 3 ? "3" : String(step);
 
   function setAnswer(id: string, value: string) {
     setAnswers((prev) => ({ ...prev, [id]: value }));
@@ -65,6 +93,10 @@ export function QualificationForm({ content, open, onClose }: Props) {
 
   function back() {
     setError(null);
+    if (step === 4) {
+      setStep(3);
+      return;
+    }
     setStep((s) => Math.max(1, s - 1));
   }
 
@@ -107,11 +139,55 @@ export function QualificationForm({ content, open, onClose }: Props) {
       }
 
       setSubmissionId(data.submissionId);
-      setSubmitted(true);
+      setAmountLabel(data.amountLabel);
+      setPaymentMethods(data.paymentMethods);
+      setPreferredMethod(data.paymentMethods[0]?.id ?? "");
+      setStep(4);
     } catch {
       setError("Błąd połączenia z serwerem. Sprawdź sieć i spróbuj ponownie.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleCheckout() {
+    if (!submissionId || isCheckingOut) return;
+    setIsCheckingOut(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          submissionId,
+          market,
+          preferredMethod,
+        }),
+      });
+
+      let data: CheckoutApiResponse | null = null;
+      try {
+        data = (await res.json()) as CheckoutApiResponse;
+      } catch {
+        setError("Serwer zwrócił nieprawidłową odpowiedź płatności.");
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        const message =
+          data && "error" in data && data.error
+            ? data.error
+            : "Nie udało się utworzyć sesji płatności.";
+        setError(message);
+        return;
+      }
+
+      window.location.assign(data.checkoutUrl);
+    } catch {
+      setError("Błąd połączenia przy inicjalizacji płatności.");
+    } finally {
+      setIsCheckingOut(false);
     }
   }
 
@@ -122,12 +198,17 @@ export function QualificationForm({ content, open, onClose }: Props) {
     setAnswers({});
     setEmail("");
     setPhone("");
-    setSubmitted(false);
     setSubmissionId(null);
+    setAmountLabel(null);
+    setPaymentMethods([]);
+    setPreferredMethod("");
     setIsSubmitting(false);
+    setIsCheckingOut(false);
     setError(null);
     onClose();
   }
+
+  const busy = isSubmitting || isCheckingOut;
 
   return (
     <section
@@ -139,71 +220,128 @@ export function QualificationForm({ content, open, onClose }: Props) {
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fjord)]">
-              Formularz · krok {submitted ? "gotowe" : step} z 3
+              Formularz · krok {progressLabel} z 4
             </p>
             <h2
               id={`${formId}-title`}
               className="mt-2 font-display text-2xl font-semibold text-[var(--ink)] sm:text-3xl"
             >
-              {form.title}
+              {step === 4 ? "Płatność" : form.title}
             </h2>
           </div>
           <button
             type="button"
             onClick={resetAndClose}
-            disabled={isSubmitting}
+            disabled={busy}
             className="text-sm font-medium text-[var(--ink-soft)]/70 underline-offset-2 hover:text-[var(--ink)] hover:underline disabled:opacity-50"
           >
             Zamknij
           </button>
         </div>
 
-        {!submitted && (
-          <ol className="mb-8 flex gap-2" aria-hidden>
-            {[1, 2, 3].map((n) => (
-              <li
-                key={n}
-                className={`h-1 flex-1 rounded-full transition ${
-                  n <= step ? "bg-[var(--fjord)]" : "bg-[var(--line)]"
-                }`}
-              />
-            ))}
-          </ol>
-        )}
+        <ol className="mb-8 flex gap-2" aria-hidden>
+          {[1, 2, 3, 4].map((n) => (
+            <li
+              key={n}
+              className={`h-1 flex-1 rounded-full transition ${
+                n <= progressStep ? "bg-[var(--fjord)]" : "bg-[var(--line)]"
+              }`}
+            />
+          ))}
+        </ol>
 
-        {submitted ? (
-          <div className="rounded-sm border border-[var(--success)]/30 bg-[color-mix(in_srgb,var(--success)_8%,white)] px-5 py-8">
-            <p className="font-display text-xl font-semibold text-[var(--ink)]">
-              Zgłoszenie zapisane
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-[var(--ink-soft)]">
-              Dziękujemy. W pilotażu 48h przejście do bramki płatności (Karta / Vipps / BLIK)
-              podłączymy w kolejnym etapie. Skontaktujemy się na{" "}
-              <strong className="font-semibold text-[var(--ink)]">{email}</strong> w sprawie
-              weryfikacji dokumentu i płatności za pakiet{" "}
-              <strong className="font-semibold text-[var(--ink)]">
-                {packages.find((p) => p.id === pkg)?.name}
-              </strong>
-              .
-            </p>
-            {submissionId && (
-              <p className="mt-3 text-xs text-[var(--ink-soft)]/70">
+        {step === 4 ? (
+          <div className="space-y-6">
+            <div className="border border-[var(--line)] bg-white px-4 py-5 sm:px-5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--fjord)]">
+                Podsumowanie
+              </p>
+              <p className="mt-2 font-display text-xl font-semibold text-[var(--ink)]">
+                {packages.find((p) => p.id === pkg)?.name} — {amountLabel}
+              </p>
+              <p className="mt-2 text-sm text-[var(--ink-soft)]">
                 Numer zgłoszenia:{" "}
-                <span className="font-mono font-medium text-[var(--ink)]">{submissionId}</span>
+                <span className="font-mono font-medium text-[var(--ink)]">
+                  {submissionId}
+                </span>
+              </p>
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                Potwierdzenie:{" "}
+                <strong className="font-semibold text-[var(--ink)]">{email}</strong>
+              </p>
+            </div>
+
+            <fieldset disabled={busy}>
+              <legend className="text-sm font-semibold text-[var(--ink)]">
+                Metoda płatności
+              </legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {paymentMethods.map((m) => {
+                  const selected = preferredMethod === m.id;
+                  return (
+                    <label
+                      key={m.id}
+                      className={`cursor-pointer border px-3 py-2 text-sm font-medium transition ${
+                        selected
+                          ? "border-[var(--ink)] bg-[var(--ink)] text-white"
+                          : "border-[var(--line)] bg-white text-[var(--ink-soft)] hover:border-[var(--fjord)]"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="payMethod"
+                        value={m.id}
+                        checked={selected}
+                        onChange={() => setPreferredMethod(m.id)}
+                        className="sr-only"
+                      />
+                      {m.label}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-[var(--ink-soft)]/80">
+                {market === "pl"
+                  ? "PL: BLIK lub karta — jednorazowa płatność."
+                  : "NO: Vipps lub karta — jednorazowa płatność."}{" "}
+                Jeśli Stripe nie jest skonfigurowany, używany jest bezpieczny tryb
+                pilotażowy (mock) z przejściem na stronę sukcesu.
+              </p>
+            </fieldset>
+
+            {error && (
+              <p
+                role="alert"
+                aria-live="assertive"
+                className="border border-[var(--accent)]/30 bg-[color-mix(in_srgb,var(--accent)_10%,white)] px-3 py-2.5 text-sm font-semibold text-[var(--accent)]"
+              >
+                {error}
               </p>
             )}
-            <button
-              type="button"
-              onClick={resetAndClose}
-              className="mt-6 text-sm font-semibold text-[var(--fjord)] underline-offset-2 hover:underline"
-            >
-              Wróć do strony
-            </button>
+
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={back}
+                disabled={busy}
+                className="px-4 py-2.5 text-sm font-semibold text-[var(--ink-soft)] underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                Wstecz
+              </button>
+              <button
+                type="button"
+                onClick={handleCheckout}
+                disabled={busy || !preferredMethod}
+                className="bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isCheckingOut ? "Przekierowanie…" : `Opłać — ${amountLabel}`}
+              </button>
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
             {step === 1 && (
-              <fieldset className="space-y-4" disabled={isSubmitting}>
+              <fieldset className="space-y-4" disabled={busy}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step1.title}
                 </legend>
@@ -232,7 +370,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
             )}
 
             {step === 2 && (
-              <fieldset className="space-y-5" disabled={isSubmitting}>
+              <fieldset className="space-y-5" disabled={busy}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step2.title}
                 </legend>
@@ -304,7 +442,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
             )}
 
             {step === 3 && (
-              <fieldset className="space-y-5" disabled={isSubmitting}>
+              <fieldset className="space-y-5" disabled={busy}>
                 <legend className="font-display text-lg font-semibold text-[var(--ink)]">
                   {form.step3.title}
                 </legend>
@@ -401,7 +539,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
                 <button
                   type="button"
                   onClick={back}
-                  disabled={isSubmitting}
+                  disabled={busy}
                   className="px-4 py-2.5 text-sm font-semibold text-[var(--ink-soft)] underline-offset-2 hover:underline disabled:opacity-50"
                 >
                   Wstecz
@@ -411,7 +549,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
                 <button
                   type="button"
                   onClick={next}
-                  disabled={isSubmitting}
+                  disabled={busy}
                   className="bg-[var(--ink)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--ink-soft)] disabled:opacity-50"
                 >
                   Dalej
@@ -419,10 +557,10 @@ export function QualificationForm({ content, open, onClose }: Props) {
               ) : (
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={busy}
                   className="bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSubmitting ? "Wysyłanie…" : form.step3.payCta}
+                  {isSubmitting ? "Zapisywanie…" : form.step3.payCta}
                 </button>
               )}
             </div>

@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { getPriceQuote, type PackageType } from "@/lib/pricing";
+import { createSubmission, saveUploadedFile } from "@/lib/submissions";
+import type { Market } from "@/lib/content";
 
 export const runtime = "nodejs";
 
@@ -6,6 +9,9 @@ type SubmitSuccess = {
   success: true;
   submissionId: string;
   message: string;
+  amountLabel: string;
+  currency: "PLN" | "NOK";
+  paymentMethods: { id: string; label: string }[];
 };
 
 type SubmitFailure = {
@@ -31,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   const marketRaw = String(formData.get("market") ?? "").trim();
-  const packageType = String(formData.get("packageType") ?? "").trim();
+  const packageTypeRaw = String(formData.get("packageType") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const customAnswersRaw = String(formData.get("customAnswers") ?? "");
@@ -49,43 +55,71 @@ export async function POST(request: Request) {
     return fail("Brak pliku dokumentu.");
   }
 
-  if (!packageType || !ALLOWED_PACKAGES.has(packageType)) {
+  if (!packageTypeRaw || !ALLOWED_PACKAGES.has(packageTypeRaw)) {
     return fail("Brak lub nieprawidłowy typ pakietu (packageType).");
   }
 
-  let customAnswers: unknown = {};
+  let customAnswers: Record<string, unknown> = {};
   if (customAnswersRaw.trim()) {
     try {
-      customAnswers = JSON.parse(customAnswersRaw);
-      if (customAnswers === null || typeof customAnswers !== "object") {
+      const parsed = JSON.parse(customAnswersRaw) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return fail("Pole customAnswers musi być obiektem JSON.");
       }
+      customAnswers = parsed as Record<string, unknown>;
     } catch {
       return fail("Nie udało się sparsować customAnswers (oczekiwano JSON).");
     }
   }
 
+  const market = marketRaw as Market;
+  const packageType = packageTypeRaw as PackageType;
+  const quote = getPriceQuote(market, packageType);
   const buffer = Buffer.from(await fileEntry.arrayBuffer());
+  const mimeType = fileEntry.type || "application/octet-stream";
 
-  // Diagnostyka serwerowa — bez treści dokumentu / e-maila w logu
-  console.info("[rada-pism/submit]", {
-    market: marketRaw,
-    packageType,
-    fileName: fileEntry.name,
-    fileSize: buffer.byteLength,
-    mimeType: fileEntry.type || "unknown",
-    hasPhone: Boolean(phone),
-    answerKeys:
-      customAnswers && typeof customAnswers === "object"
-        ? Object.keys(customAnswers as Record<string, unknown>)
-        : [],
-  });
+  const { storedFileName, filePath } = await saveUploadedFile(
+    buffer,
+    fileEntry.name,
+    mimeType,
+  );
 
   const submissionId = `sub_${Date.now()}`;
+  const record = await createSubmission({
+    id: submissionId,
+    market,
+    packageType,
+    email,
+    phone,
+    customAnswers,
+    originalFileName: fileEntry.name,
+    storedFileName,
+    filePath,
+    mimeType,
+    fileSize: buffer.byteLength,
+    amountMajor: quote.amountMajor,
+    currency: quote.currency,
+  });
+
+  console.info("[rada-pism/submit]", {
+    submissionId: record.id,
+    market: record.market,
+    packageType: record.packageType,
+    fileName: record.originalFileName,
+    storedFileName: record.storedFileName,
+    fileSize: record.fileSize,
+    amount: quote.label,
+    hasPhone: Boolean(phone),
+    answerKeys: Object.keys(customAnswers),
+  });
+
   const body: SubmitSuccess = {
     success: true,
-    submissionId,
-    message: "Zgłoszenie przyjęte. Skontaktujemy się w sprawie weryfikacji i płatności.",
+    submissionId: record.id,
+    message: "Zgłoszenie zapisane. Przejdź do płatności, aby uruchomić realizację.",
+    amountLabel: quote.label,
+    currency: quote.currency,
+    paymentMethods: quote.paymentMethods,
   };
 
   return NextResponse.json(body, { status: 200 });

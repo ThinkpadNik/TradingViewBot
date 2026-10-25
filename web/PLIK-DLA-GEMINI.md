@@ -1,4 +1,4 @@
-# Rada Pism — kontekst dla Gemini (po ETAP 1 + ETAP 2)
+# Rada Pism — kontekst dla Gemini (po ETAP 1–3)
 
 Skopiuj ten plik do Gemini (lub wskaż go w workspace), gdy kontynuujesz pracę nad projektem.
 
@@ -30,19 +30,17 @@ Stack: **Next.js App Router + TypeScript + Tailwind** w katalogu `web/`.
 
 ### ETAP 2 — Backend zgłoszeń API ✅
 
-- Route: `src/app/api/submit/route.ts`
-- `POST` + `FormData`:
-  - `market` (`no` | `pl`)
-  - `packageType` (`response` | `guardian`)
-  - `email`, `phone`
-  - `customAnswers` (JSON string)
-  - `file` (zdjęcie/PDF)
-- Brak rynku / e-maila / pliku → **400** `{ success: false, error: "..." }`
-- Sukces → **200** `{ success: true, submissionId: "sub_" + Date.now(), message: "..." }`
-- Log serwera: rynek, pakiet, nazwa pliku, rozmiar (bez treści dokumentu / e-maila)
-- `QualificationForm.tsx`: `fetch('/api/submit')`, `isSubmitting`, błędy, sukces z `submissionId`
+- Route: `src/app/api/submit/route.ts` — FormData + walidacja 400
 
-**Brak jeszcze:** trwałego storage plików, e-maila potwierdzenia, bramki płatności.
+### ETAP 3 — Storage + płatności ✅
+
+- Pliki: `uploads/<uuid>.ext` (unikalna nazwa)
+- Metadane: `data/submissions.json` (id, rynek, pakiet, e-mail, ścieżka, data, status płatności)
+- `POST /api/checkout` — `submissionId` + `market`; kwoty PL 99/249 zł, NO 299/799 NOK
+- Stripe Checkout gdy `STRIPE_SECRET_KEY`, inaczej mock → `/sukces?id=…&mock=1`
+- Formularz: po submitcie **krok 4 płatności** (BLIK/Karta lub Vipps/Karta) → redirect
+
+**Brak jeszcze:** e-mail potwierdzenia, panel operatora, webhook Stripe.
 
 ### Uruchomienie
 
@@ -75,17 +73,24 @@ web/
 │   ├── page.tsx                   # redirect → /no
 │   ├── no/page.tsx
 │   ├── pl/page.tsx
-│   └── api/submit/route.ts        # ETAP 2 — POST FormData
+│   ├── api/submit/route.ts        # zapis pliku + JSON
+│   ├── api/checkout/route.ts      # Stripe lub mock checkout
+│   └── sukces/page.tsx            # strona po płatności
 ├── src/components/
-│   ├── LandingPage.tsx            # CTA → otwarcie formularza
-│   ├── SiteHeader.tsx             # marka + NO/PL
+│   ├── LandingPage.tsx
+│   ├── SiteHeader.tsx
 │   ├── DemoPanel.tsx
-│   ├── QualificationForm.tsx      # 3 kroki + fetch /api/submit
-│   └── TrustFooter.tsx            # AI Act
-├── src/lib/content.ts             # WSZYSTKIE treści NO/PL
-├── PLIK-DLA-GEMINI.md             # ten plik
-├── package.json
-└── README.md
+│   ├── QualificationForm.tsx      # kroki 1–3 + krok 4 płatności
+│   └── TrustFooter.tsx
+├── src/lib/
+│   ├── content.ts                 # copy NO/PL
+│   ├── pricing.ts                 # kwoty i metody płatności
+│   └── submissions.ts             # storage uploads + JSON
+├── uploads/                       # pliki (gitignored)
+├── data/                          # submissions.json (gitignored)
+├── .env.example
+├── PLIK-DLA-GEMINI.md
+└── package.json
 ```
 
 Design: fjord/ink (`--ink`, `--fjord`, `--accent`). Nie zmieniaj na Inter/Roboto/fiolet/cream+terracotta.
@@ -102,21 +107,16 @@ Design: fjord/ink (`--ink`, `--fjord`, `--accent`). Nie zmieniaj na Inter/Roboto
 
 ---
 
-## Sugerowany kolejny etap (ETAP 3+)
+## Sugerowany kolejny etap (ETAP 4+)
 
-Priorytet pod smoke test 48h:
+1. **Webhook Stripe** + weryfikacja sesji (zamiast ufać samym query params na `/sukces`).
+2. **E-mail potwierdzenia** (submissionId, kwota, dalsze kroki).
+3. **Panel operatora** — lista spraw z `data/submissions.json`, podgląd z `uploads/`.
+4. **Object storage / DB** jeśli pilotaż wyjdzie poza jedną instancję Vercel (lokalny FS jest ulotny).
+5. **Analytics** CTA / submit / checkout — bez skryptów na samym pliku dokumentu.
+6. **Deploy** + `NEXT_PUBLIC_APP_URL` + `STRIPE_SECRET_KEY`.
 
-1. **Płatności** po sukcesie submitu  
-   - NO: Karta / Vipps  
-   - PL: BLIK / Karta  
-   Redirect/checkout → status „opłacone” powiązany z `submissionId`.
-2. **Trwały storage** zgłoszeń + plików (DB / object storage) — dziś API tylko waliduje, buforuje i loguje.
-3. **E-mail potwierdzenia** do klienta (numer `submissionId`, dalsze kroki).
-4. **Panel operatora** (minimalny) — lista spraw, podgląd dokumentu, status „wysłane w 24h”.
-5. **Analytics** — eventy CTA / submit / płatność; bez zewnętrznych skryptów na samym pliku dokumentu.
-6. **Deploy** (Vercel itd.) + domena `/no` `/pl`.
-
-Jeśli użytkownik wklei konkretny brief — realizuj ten brief; powyższe to domyślny backlog.
+Jeśli użytkownik wklei konkretny brief — realizuj ten brief.
 
 ---
 
@@ -144,6 +144,6 @@ Jeśli użytkownik wklei konkretny brief — realizuj ten brief; powyższe to do
 ## Instrukcja startowa dla Gemini
 
 > Jesteś full-stack developerem. Projekt **Rada Pism** jest w `web/`.  
-> ETAP 1 (landing) i ETAP 2 (`POST /api/submit` + podpięty formularz) są gotowe.  
-> Najpierw przeczytaj `web/PLIK-DLA-GEMINI.md`, `web/src/lib/content.ts` oraz `web/src/app/api/submit/route.ts`.  
-> Potem realizuj zadanie użytkownika (zwykle ETAP 3: płatności Vipps/BLIK/karta + storage), bez psucia CRO above-the-fold, kontraktu API i bez wymogu konta przed uploadem.
+> ETAP 1–3 (landing, `/api/submit` + storage, `/api/checkout` + krok płatności, `/sukces`) są gotowe.  
+> Najpierw przeczytaj `web/PLIK-DLA-GEMINI.md`, `content.ts`, `pricing.ts`, `submissions.ts`.  
+> Potem realizuj zadanie użytkownika (zwykle ETAP 4: webhook Stripe / e-mail / panel), bez psucia CRO i bez wymogu konta przed uploadem.

@@ -23,5 +23,6 @@ Build produkcyjny: `npm run build && npm start`.
 - Formularz po CTA: upload → kwalifikacja (różna per rynek) → pakiet + kontakt
 - Stopka z ujawnieniem AI Act Art. 50
 - Bez wymogu konta przed uploadem
-- API zgłoszeń: `POST /api/submit` (FormData: market, packageType, email, phone, customAnswers, file)
-- Płatność: przycisk „Przejdź do płatności” przygotowany pod Vipps/Kartę (NO) i BLIK/Kartę (PL) — bramka w kolejnym etapie
+- API zgłoszeń: `POST /api/submit` — zapis pliku w `uploads/` + metadane w `data/submissions.json`
+- Checkout: `POST /api/checkout` — Stripe Checkout (gdy `STRIPE_SECRET_KEY`) lub mock → `/sukces?id=sub_…`
+- Formularz: krok 4 płatności (BLIK/Karta PL, Vipps/Karta NO)
