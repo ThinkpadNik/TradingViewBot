@@ -94,18 +94,20 @@ Bez klucza: skip + log — API nie pada.
 
 ---
 
-## Env — `web/.env.example`
+## Env — Vercel / `.env.production.example`
 
 ```bash
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-OPERATOR_PASSWORD=
-RESEND_API_KEY=
-RESEND_FROM=Rada Pism <onboarding@resend.dev>
-BLOB_READ_WRITE_TOKEN=
-NEXT_PUBLIC_PLAUSIBLE_DOMAIN=
+NEXT_PUBLIC_APP_URL=https://twoja-domena.vercel.app
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+OPERATOR_PASSWORD=silne_haslo_do_panelu_operatora
+RESEND_API_KEY=re_...
+RESEND_FROM=Rada Pism <pilot@twoja-domena.pl>
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
 ```
+
+Lokalnie: `web/.env.example` (domyślnie `sk_test_…` + `localhost`).
 
 ---
 

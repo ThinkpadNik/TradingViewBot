@@ -19,20 +19,21 @@ Wartości sekretów bierz z paneli Stripe / Resend / Vercel Blob — **nie commi
 | `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | Nie | Domena w Plausible (cookieless) | Panel Plausible |
 | `NEXT_PUBLIC_PLAUSIBLE_SCRIPT` | Nie | Domyślnie `https://plausible.io/js/script.js` | tylko przy self-host |
 
-### Gotowiec do skopiowania (puste wartości)
+### Gotowiec do wklejenia w Vercel
 
 ```bash
-NEXT_PUBLIC_APP_URL=https://TWOJA-DOMENA.vercel.app
-BLOB_READ_WRITE_TOKEN=
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-RESEND_API_KEY=
-RESEND_FROM=Rada Pism <noreply@twoja-domena.pl>
-OPERATOR_PASSWORD=
-NEXT_PUBLIC_PLAUSIBLE_DOMAIN=
+NEXT_PUBLIC_APP_URL=https://twoja-domena.vercel.app
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+OPERATOR_PASSWORD=silne_haslo_do_panelu_operatora
+RESEND_API_KEY=re_...
+RESEND_FROM=Rada Pism <pilot@twoja-domena.pl>
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
 ```
 
-Lokalnie te same klucze możesz trzymać w `web/.env.local` lub `web/.env.production.local` (oba są w `.gitignore`).
+Podmień placeholdery na prawdziwe wartości (`sk_test_…` na czas testów).  
+Lokalnie: `web/.env.local` lub `web/.env.production.local` (gitignore).
 
 ---
 
