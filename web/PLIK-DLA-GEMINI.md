@@ -153,24 +153,23 @@ web/src/components/
 
 ---
 
-## Deploy Vercel (Punkt 1)
+## Deploy Vercel
 
-Zob. **`web/DEPLOY-VERCEL.md`** i **`web/.env.production.example`**.
+Zob. **`web/DEPLOY-VERCEL.md`**.
 
-Root Directory w Vercel = `web`. Kluczowe env produkcyjne:
-
-- `NEXT_PUBLIC_APP_URL`, `BLOB_READ_WRITE_TOKEN` (wymagane)
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
-- `RESEND_API_KEY`, `RESEND_FROM`
-- `OPERATOR_PASSWORD` (nie zostawiaj domyślnego `rada-pilot`)
+- **Punkt 1 — env:** Root Directory `web`; lista w `.env.production.example`.  
+  `BLOB_READ_WRITE_TOKEN` → automatyczny switch z `uploads/` na Vercel Blob (trwałość plików).
+- **Punkt 2 — Stripe webhook:**  
+  URL `https://twoja-domena.vercel.app/api/webhook/stripe`  
+  event `checkout.session.completed` → `whsec_…` jako `STRIPE_WEBHOOK_SECRET` → Redeploy.  
+  Efekt: status `paid` + drugi e-mail Resend.
 
 ## Sugerowany kolejny etap (jeśli brak briefu)
 
-1. Uzupełnić sekrety w Vercel + deploy (`DEPLOY-VERCEL.md`)  
-2. Stripe webhook → `/api/webhook/stripe`  
-3. Domena Resend / własny `RESEND_FROM`  
-4. Retencja / TTL plików w Blob  
-5. Test E2E płatności NO/PL
+1. Uzupełnić sekrety + deploy + webhook (`DEPLOY-VERCEL.md`)  
+2. Domena Resend / własny `RESEND_FROM`  
+3. Retencja / TTL plików w Blob  
+4. Test E2E płatności NO/PL
 
 ---
 

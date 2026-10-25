@@ -17,15 +17,15 @@ npm run dev
 
 Build produkcyjny: `npm run build && npm start`.
 
-## Deploy na Vercel (Punkt 1 — env)
+## Deploy na Vercel
 
-Pełna checklista: **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**.
+Pełna instrukcja: **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**.
 
-- W Vercel ustaw **Root Directory** = `web`
-- Skopiuj zmienne z `.env.production.example` / `.env.example` do  
-  **Project Settings → Environment Variables** (Production)
-- Po deployu dodaj Stripe webhook: `https://TWOJA-DOMENA/api/webhook/stripe`  
-  (event `checkout.session.completed` → `STRIPE_WEBHOOK_SECRET`)
+1. **Env** — Root Directory `web` + zmienne z `.env.production.example`  
+   (`BLOB_READ_WRITE_TOKEN` przełącza storage z `uploads/` na Vercel Blob)
+2. **Stripe webhook** — Endpoint URL  
+   `https://twoja-domena.vercel.app/api/webhook/stripe`  
+   event `checkout.session.completed` → Signing secret jako `STRIPE_WEBHOOK_SECRET` → Redeploy
 
 ## Zakres pilotażu
 

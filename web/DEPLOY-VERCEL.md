@@ -1,25 +1,14 @@
-# Deploy Rada Pism na Vercel — Punkt 1 (env)
+# Deploy Rada Pism na Vercel
 
 Aplikacja żyje w katalogu **`web/`**. W Vercel ustaw **Root Directory** = `web`.
 
-## 1. Project Settings → Environment Variables
+---
 
-Wklej poniższe zmienne dla środowisk **Production** (oraz Preview, jeśli testujesz PR-y).  
-Wartości sekretów bierz z paneli Stripe / Resend / Vercel Blob — **nie commituj** prawdziwych kluczy.
+## Punkt 1: Konfiguracja i zmienne środowiskowe
 
-| Zmienna | Wymagana na prod? | Opis | Gdzie wziąć |
-|---------|-------------------|------|-------------|
-| `NEXT_PUBLIC_APP_URL` | **Tak** | Publiczny origin (bez `/` na końcu), np. `https://rada-pism.vercel.app` | Twoja domena Vercel / custom |
-| `BLOB_READ_WRITE_TOKEN` | **Tak** (prod) | Vercel Blob — pliki + metadane zgłoszeń | Vercel → Storage → Blob → token |
-| `STRIPE_SECRET_KEY` | Tak (płatności live/test) | Klucz tajny Stripe (`sk_live_…` / `sk_test_…`) | [Stripe Dashboard → API keys](https://dashboard.stripe.com/apikeys) |
-| `STRIPE_WEBHOOK_SECRET` | Tak (gdy webhook) | Secret endpointu webhook (`whsec_…`) | Stripe → Developers → Webhooks |
-| `RESEND_API_KEY` | Zalecana | Wysyłka e-maili potwierdzeń | [Resend → API Keys](https://resend.com/api-keys) |
-| `RESEND_FROM` | Zalecana | Nadawca, np. `Rada Pism <noreply@twoja-domena.pl>` | Zweryfikowana domena w Resend |
-| `OPERATOR_PASSWORD` | **Tak** | Hasło panelu `/operator` | Wymyśl silne hasło (nie zostawiaj `rada-pilot`) |
-| `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | Nie | Domena w Plausible (cookieless) | Panel Plausible |
-| `NEXT_PUBLIC_PLAUSIBLE_SCRIPT` | Nie | Domyślnie `https://plausible.io/js/script.js` | tylko przy self-host |
+**Project Settings → Environment Variables** (Production; opcjonalnie Preview).
 
-### Gotowiec do wklejenia w Vercel
+### Gotowiec do wklejenia
 
 ```bash
 NEXT_PUBLIC_APP_URL=https://twoja-domena.vercel.app
@@ -32,41 +21,72 @@ BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
 ```
 
-Podmień placeholdery na prawdziwe wartości (`sk_test_…` na czas testów).  
-Lokalnie: `web/.env.local` lub `web/.env.production.local` (gitignore).
+| Zmienna | Opis |
+|---------|------|
+| `NEXT_PUBLIC_APP_URL` | Publiczny origin (bez `/` na końcu) — success/cancel URL Stripe |
+| `STRIPE_SECRET_KEY` | `sk_live_…` lub `sk_test_…` |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` z Punktu 2 (po utworzeniu endpointu) |
+| `OPERATOR_PASSWORD` | Hasło `/operator` — nie zostawiaj domyślnego `rada-pilot` |
+| `RESEND_API_KEY` / `RESEND_FROM` | E-maile potwierdzeń |
+| `BLOB_READ_WRITE_TOKEN` | Trwały storage plików i metadanych |
+| `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | Opcjonalny Plausible (bez cookies) |
+
+Lokalnie: `web/.env.local` (gitignore). Szablony: `.env.example`, `.env.production.example`.
+
+### Wskazówka — Vercel Blob
+
+Po dodaniu tokena **`BLOB_READ_WRITE_TOKEN`** system automatycznie przestawi się z lokalnego folderu `uploads/` na chmurę **Vercel Blob**, dzięki czemu pliki **nie znikną** przy restarcie / cold start instancji serverless.
+
+Bez tokena kod używa lokalnego FS (`uploads/` + `data/submissions.json`) — OK na `npm run dev`, **niebezpieczne na Vercel**.
 
 ---
 
-## 2. Po pierwszym deployu — Stripe Webhook
+## Punkt 2: Konfiguracja Stripe Dashboard (Webhook)
 
-1. Stripe Dashboard → **Developers → Webhooks → Add endpoint**
-2. URL: `https://TWOJA-DOMENA/api/webhook/stripe`
-3. Event: `checkout.session.completed`
-4. Skopiuj **Signing secret** → `STRIPE_WEBHOOK_SECRET` w Vercel
-5. Redeploy (żeby Vercel wczytał nową zmienną)
+Żeby płatności w tle automatycznie zmieniały status zgłoszenia na **`paid`** i wyzwalały **drugi e-mail** z potwierdzeniem:
 
----
+1. Zaloguj się do **Stripe Dashboard**.
+2. Wejdź w **Developers (Deweloperzy) → Webhooks → Add endpoint**.
+3. W polu **Endpoint URL** podaj:
+   ```
+   https://twoja-domena.vercel.app/api/webhook/stripe
+   ```
+   (podmień domenę na swoją produkcyjną / Vercel).
+4. W **Select events** zaznacz wyłącznie:
+   - `checkout.session.completed`
+5. Kliknij **Add endpoint**, skopiuj **Signing secret** (`whsec_…`).
+6. Wklej go w Vercel jako zmienną **`STRIPE_WEBHOOK_SECRET`**.
+7. Zrób **Redeploy**, żeby runtime wczytał nowy secret.
 
-## 3. Vercel Blob
+### Co robi webhook w kodzie
 
-1. Vercel Project → **Storage** → utwórz **Blob** store  
-2. Połącz ze projektem — Vercel zwykle wstrzyknie `BLOB_READ_WRITE_TOKEN`  
-3. Bez tego tokena produkcja spadnie na lokalny FS (na serverless **ulotny** — nie używaj w prod)
+Route: `src/app/api/webhook/stripe/route.ts`
 
----
+- Weryfikuje podpis Stripe (`STRIPE_WEBHOOK_SECRET`)
+- Przy `checkout.session.completed` czyta `submissionId` z `metadata` / `client_reference_id`
+- Ustawia `paymentStatus: "paid"` w storage
+- Wysyła e-mail potwierdzenia płatności (Resend), jeśli `RESEND_API_KEY` jest ustawione
 
-## 4. Resend
-
-1. Zweryfikuj domenę nadawcy  
-2. Ustaw `RESEND_API_KEY` + `RESEND_FROM`  
-3. Bez klucza API działa, ale e-maile są pomijane (log serwerowy)
-
----
-
-## 5. Deploy
+### Test lokalny (opcjonalnie)
 
 ```bash
-# z katalogu web/ — lub Root Directory = web w Vercel UI
+stripe listen --forward-to localhost:3000/api/webhook/stripe
+# wklej wypisany whsec_… do .env.local jako STRIPE_WEBHOOK_SECRET
+```
+
+---
+
+## Resend (e-mail)
+
+1. Zweryfikuj domenę nadawcy w Resend.  
+2. Ustaw `RESEND_API_KEY` + `RESEND_FROM` (np. `Rada Pism <pilot@twoja-domena.pl>`).  
+3. Bez klucza API działa, e-maile są pomijane (log serwerowy).
+
+---
+
+## Deploy
+
+```bash
 cd web
 npx vercel          # preview
 npx vercel --prod   # production
@@ -74,20 +94,20 @@ npx vercel --prod   # production
 
 Albo: podłącz repo w Vercel UI → Root Directory `web` → Deploy.
 
-### Checklist po deployu
+### Checklist
 
-- [ ] `https://…/no` i `/pl` ładują się  
-- [ ] Submit formularza tworzy zgłoszenie (Blob)  
-- [ ] Checkout → Stripe test → `/sukces`  
-- [ ] Webhook ustawia status `paid` (Stripe CLI / Dashboard event log)  
-- [ ] E-mail przychodzi (Resend)  
-- [ ] `/operator` działa tylko z `OPERATOR_PASSWORD`  
-- [ ] Brak Meta/GA w źródle strony  
+- [ ] Env z Punktu 1 uzupełnione (w tym Blob + Operator password)  
+- [ ] Webhook Stripe z Punktu 2 + `STRIPE_WEBHOOK_SECRET` + redeploy  
+- [ ] `/no` i `/pl` działają  
+- [ ] Submit zapisuje do Blob (nie ulotny dysk)  
+- [ ] Checkout → event `checkout.session.completed` → status `paid` w `/operator`  
+- [ ] E-mail po submitcie + po opłaceniu  
+- [ ] Brak Meta/GA w HTML  
 
 ---
 
 ## Uwagi
 
-- Zmienne `NEXT_PUBLIC_*` są widoczne w przeglądarce — nie wkładaj tam sekretów.  
-- Po zmianie env w Vercel zrób **Redeploy**.  
-- Panel operatora: ustaw własne `OPERATOR_PASSWORD` przed smoke testem publicznym.
+- `NEXT_PUBLIC_*` są widoczne w przeglądarce — bez sekretów.  
+- Po każdej zmianie env w Vercel → **Redeploy**.  
+- Kod nie wymaga konta klienta przed uploadem dokumentu.
