@@ -165,12 +165,14 @@ Zob. **`web/DEPLOY-VERCEL.md`**.
   Efekt: status `paid` + drugi e-mail Resend.
 - **Punkt 3 — Resend domena:** Domains → DNS (DKIM/SPF/MX) →  
   `RESEND_FROM=Rada Pism <kontakt@radapism.pl>` (nie używaj `onboarding@resend.dev` na żywo).
+- **Punkt 4 — E2E:** `/pl` (99 zł, Stripe test `4242…`) + `/no` (299 NOK) + `/sukces` + e-mail + `/operator`  
+  (pełna instrukcja w `DEPLOY-VERCEL.md`).
 
 ## Sugerowany kolejny etap (jeśli brak briefu)
 
-1. Uzupełnić sekrety + deploy + webhook + domena Resend (`DEPLOY-VERCEL.md`)  
+1. Uzupełnić sekrety + deploy + webhook + domena Resend + przejść Punkt 4 E2E  
 2. Retencja / TTL plików w Blob  
-3. Test E2E płatności NO/PL
+3. Monitoring błędów (np. Vercel logs / Stripe event delivery)
 
 ---
 

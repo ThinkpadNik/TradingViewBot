@@ -28,6 +28,8 @@ Pełna instrukcja: **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**.
    event `checkout.session.completed` → `STRIPE_WEBHOOK_SECRET` → Redeploy
 3. **Resend domena** — Domains → DNS (DKIM/SPF/MX) →  
    `RESEND_FROM=Rada Pism <kontakt@radapism.pl>` (nie `onboarding@resend.dev`)
+4. **E2E** — `/pl` (99 zł, karta testowa `4242…`) + `/no` (299 NOK) + `/operator`  
+   (szczegóły w `DEPLOY-VERCEL.md` → Punkt 4)
 
 ## Zakres pilotażu
 

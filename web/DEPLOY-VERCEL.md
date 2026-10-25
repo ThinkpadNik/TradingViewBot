@@ -99,6 +99,59 @@ Przed oficjalnym startem testów na żywo skonfiguruj własną domenę:
 
 ---
 
+## Punkt 4: Testy E2E — obie ścieżki rynkowe
+
+Wykonaj te dwa szybkie testy, żeby upewnić się, że PL i NO działają end-to-end.  
+Lokalnie: `http://localhost:3000` · na prod: `https://twoja-domena.vercel.app`.
+
+Do płatności Stripe w trybie testowym używaj karty:
+
+| Pole | Wartość |
+|------|---------|
+| Numer | `4242 4242 4242 4242` |
+| Data | dowolna przyszła |
+| CVC | `123` |
+
+(Wymaga `STRIPE_SECRET_KEY=sk_test_…`. Bez Stripe aplikacja używa **mock checkout** → `/sukces?mock=1`.)
+
+### Ścieżka Polska (`/pl` — Kosztorys OC, 99 zł)
+
+1. Wejdź na `/pl`.
+2. Kliknij CTA **„Przygotuj odwołanie — 99 zł”**, wgraj PDF/zdjęcie testowe, wpisz **prawdziwy e-mail**, wybierz pakiet **Gotowa odpowiedź (99 zł)**.
+3. Przejdź do kroku płatności, wybierz **BLIK** lub **Karta**, kliknij opłacenie.
+4. W Stripe Test Mode zapłać kartą `4242…` (jak wyżej).
+5. Sprawdź redirect na **`/sukces`** oraz e-mail Resend z numerem `sub_…`.
+6. Wejdź na **`/operator`**, zaloguj się (`OPERATOR_PASSWORD` lub domyślnie `rada-pilot`), potwierdź zgłoszenie na liście i **pobierz** wgrany plik.
+
+Oczekiwane: `amountLabel` = **99 zł**, `currency` = **PLN**, metody BLIK/Karta (`pricing.ts`).
+
+### Ścieżka Norwegia (`/no` — Inkasso, 299 NOK)
+
+1. Wejdź na `/no`.
+2. Przejdź analogiczny formularz — pakiet **Gotowa odpowiedź (299 NOK)**.
+3. Zweryfikuj w podsumowaniu kroku 4: kwota **299 NOK**, metody **Vipps / Karta** (zgodnie z `src/lib/pricing.ts`).
+4. Opłać (Stripe test lub mock) → `/sukces` → e-mail → `/operator` jak wyżej.
+
+Oczekiwane: `amountLabel` = **299 NOK**, `currency` = **NOK**.
+
+### Szybki smoke API (opcjonalnie)
+
+```bash
+# PL 99 zł
+curl -s -X POST http://localhost:3000/api/submit \
+  -F 'market=pl' -F 'packageType=response' \
+  -F 'email=test@example.com' -F 'customAnswers={}' \
+  -F 'file=@./demo.pdf;type=application/pdf'
+
+# NO 299 NOK
+curl -s -X POST http://localhost:3000/api/submit \
+  -F 'market=no' -F 'packageType=response' \
+  -F 'email=test@example.com' -F 'customAnswers={}' \
+  -F 'file=@./demo.pdf;type=application/pdf'
+```
+
+---
+
 ## Deploy
 
 ```bash
@@ -114,11 +167,20 @@ Albo: podłącz repo w Vercel UI → Root Directory `web` → Deploy.
 - [ ] Env z Punktu 1 uzupełnione (w tym Blob + Operator password)  
 - [ ] Webhook Stripe z Punktu 2 + `STRIPE_WEBHOOK_SECRET` + redeploy  
 - [ ] Domena Resend zweryfikowana (Punkt 3) + `RESEND_FROM=Rada Pism <kontakt@radapism.pl>`  
-- [ ] `/no` i `/pl` działają  
+- [ ] E2E `/pl` (99 zł) — Punkt 4  
+- [ ] E2E `/no` (299 NOK) — Punkt 4  
 - [ ] Submit zapisuje do Blob (nie ulotny dysk)  
-- [ ] Checkout → event `checkout.session.completed` → status `paid` w `/operator`  
+- [ ] Checkout → `paid` w `/operator` + pobieranie pliku  
 - [ ] E-mail po submitcie + po opłaceniu (nie z `onboarding@resend.dev`)  
 - [ ] Brak Meta/GA w HTML  
+
+---
+
+## Status pilotażu
+
+Wszystkie klocki są spięte: landing → submit → storage → checkout → webhook → e-mail → operator,  
+z ujawnieniem **AI Act** i **bez zewnętrznego trackingu** dokumentów.  
+Po Punktach 1–4 system jest gotowy do zbierania pierwszych płatnych zgłoszeń.
 
 ---
 
