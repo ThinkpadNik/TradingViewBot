@@ -93,6 +93,13 @@ export async function createSubmission(
   return record;
 }
 
+export async function listSubmissions(): Promise<SubmissionRecord[]> {
+  const records = await readStore();
+  return [...records].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 export async function getSubmission(
   id: string,
 ): Promise<SubmissionRecord | null> {

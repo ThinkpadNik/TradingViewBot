@@ -26,3 +26,4 @@ Build produkcyjny: `npm run build && npm start`.
 - API zgłoszeń: `POST /api/submit` — zapis pliku w `uploads/` + metadane w `data/submissions.json`
 - Checkout: `POST /api/checkout` — Stripe Checkout (gdy `STRIPE_SECRET_KEY`) lub mock → `/sukces?id=sub_…`
 - Formularz: krok 4 płatności (BLIK/Karta PL, Vipps/Karta NO)
+- Panel operatora: `/operator` (hasło `OPERATOR_PASSWORD`, domyślnie `rada-pilot`) + pobieranie plików

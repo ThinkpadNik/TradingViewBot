@@ -44,7 +44,13 @@ Stack: **Next.js App Router + TypeScript + Tailwind** w katalogu `web/`.
 - `POST /api/checkout` + strona `/sukces`
 - Formularz: krok 4 płatności
 
-**Brak jeszcze:** webhook Stripe, e-mail potwierdzenia, panel operatora, trwały storage poza lokalnym FS (Vercel ephemeral).
+### Panel operatora ✅
+- `/operator` — hasło `OPERATOR_PASSWORD` (domyślnie `rada-pilot`), cookie httpOnly
+- Lista zgłoszeń z filtrem NO/PL, status płatności, pobierz/podgląd pliku
+- `GET /api/operator/download?submissionId=…` (+ `inline=1`), wymaga sesji operatora
+- `POST /api/operator/login` · `POST /api/operator/logout`
+
+**Brak jeszcze:** webhook Stripe, e-mail potwierdzenia, trwały storage poza lokalnym FS (Vercel ephemeral).
 
 ---
 
@@ -132,15 +138,16 @@ web/
 │   ├── no/page.tsx · pl/page.tsx
 │   ├── api/submit/route.ts
 │   ├── api/checkout/route.ts
+│   ├── api/operator/{login,logout,download}/route.ts
+│   ├── operator/page.tsx
 │   └── sukces/page.tsx
 ├── src/components/
 │   ├── LandingPage.tsx · SiteHeader.tsx · DemoPanel.tsx
-│   ├── QualificationForm.tsx   # kroki 1–4
+│   ├── QualificationForm.tsx
+│   ├── operator/OperatorLogin.tsx · OperatorDashboard.tsx
 │   └── TrustFooter.tsx
 ├── src/lib/
-│   ├── content.ts       # copy NO/PL
-│   ├── pricing.ts       # kwoty + metody
-│   └── submissions.ts   # FS uploads + JSON store
+│   ├── content.ts · pricing.ts · submissions.ts · operator-auth.ts
 ├── uploads/             # gitignored (zostaw .gitkeep)
 ├── data/                # gitignored submissions.json
 ├── .env.example
@@ -166,10 +173,9 @@ Design: fjord/ink (`--ink`, `--fjord`, `--accent`). Bez Inter/Roboto/fioletu/cre
 
 1. **Webhook Stripe** + weryfikacja `session_id` na `/sukces` (dziś mock/query params).
 2. **E-mail potwierdzenia** (submissionId, kwota, dalsze kroki).
-3. **Panel operatora** — lista z `data/submissions.json`, podgląd `uploads/`.
-4. **Object storage / DB** przy deployu na Vercel (lokalny FS jest ulotny).
-5. Analytics CTA/submit/checkout — bez skryptów na samym pliku dokumentu.
-6. Deploy + `NEXT_PUBLIC_APP_URL` + `STRIPE_SECRET_KEY`.
+3. **Object storage / DB** przy deployu na Vercel (lokalny FS jest ulotny).
+4. Analytics CTA/submit/checkout — bez skryptów na samym pliku dokumentu.
+5. Deploy + `NEXT_PUBLIC_APP_URL` + `STRIPE_SECRET_KEY` + `OPERATOR_PASSWORD`.
 
 Jeśli użytkownik wklei konkretny brief — realizuj ten brief.
 
