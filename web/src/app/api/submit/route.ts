@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { sendSubmissionReceivedEmail } from "@/lib/email";
 import { getPriceQuote, type PackageType } from "@/lib/pricing";
-import { createSubmission, saveUploadedFile } from "@/lib/submissions";
+import { createSubmission, saveUploadedFile, updateSubmission } from "@/lib/submissions";
 import type { Market } from "@/lib/content";
 
 export const runtime = "nodejs";
@@ -78,11 +79,7 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await fileEntry.arrayBuffer());
   const mimeType = fileEntry.type || "application/octet-stream";
 
-  const { storedFileName, filePath } = await saveUploadedFile(
-    buffer,
-    fileEntry.name,
-    mimeType,
-  );
+  const saved = await saveUploadedFile(buffer, fileEntry.name, mimeType);
 
   const submissionId = `sub_${Date.now()}`;
   const record = await createSubmission({
@@ -93,8 +90,10 @@ export async function POST(request: Request) {
     phone,
     customAnswers,
     originalFileName: fileEntry.name,
-    storedFileName,
-    filePath,
+    storedFileName: saved.storedFileName,
+    filePath: saved.filePath,
+    fileUrl: saved.fileUrl,
+    storageBackend: saved.storageBackend,
     mimeType,
     fileSize: buffer.byteLength,
     amountMajor: quote.amountMajor,
@@ -108,10 +107,18 @@ export async function POST(request: Request) {
     fileName: record.originalFileName,
     storedFileName: record.storedFileName,
     fileSize: record.fileSize,
+    storageBackend: record.storageBackend,
     amount: quote.label,
     hasPhone: Boolean(phone),
     answerKeys: Object.keys(customAnswers),
   });
+
+  const mail = await sendSubmissionReceivedEmail(record);
+  if (mail.sent) {
+    await updateSubmission(record.id, {
+      receivedEmailSentAt: new Date().toISOString(),
+    });
+  }
 
   const body: SubmitSuccess = {
     success: true,

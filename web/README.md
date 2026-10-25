@@ -27,3 +27,7 @@ Build produkcyjny: `npm run build && npm start`.
 - Checkout: `POST /api/checkout` — Stripe Checkout (gdy `STRIPE_SECRET_KEY`) lub mock → `/sukces?id=sub_…`
 - Formularz: krok 4 płatności (BLIK/Karta PL, Vipps/Karta NO)
 - Panel operatora: `/operator` (hasło `OPERATOR_PASSWORD`, domyślnie `rada-pilot`) + pobieranie plików
+- Stripe webhook: `POST /api/webhook/stripe` → status `paid`
+- E-mail Resend (opcjonalnie `RESEND_API_KEY`) po submitcie i po opłaceniu
+- Storage: lokalny FS w dev; `@vercel/blob` gdy `BLOB_READ_WRITE_TOKEN`
+- Analytics: tylko anonimowe eventy funnel + opcjonalny Plausible (bez Meta/GA)

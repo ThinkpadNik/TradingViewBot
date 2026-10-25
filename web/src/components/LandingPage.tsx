@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { brand, markets, type Market } from "@/lib/content";
+import { trackEvent } from "@/lib/analytics";
 import { SiteHeader } from "@/components/SiteHeader";
 import { DemoPanel } from "@/components/DemoPanel";
 import { QualificationForm } from "@/components/QualificationForm";
@@ -28,6 +29,8 @@ export function LandingPage({ market }: { market: Market }) {
   }, [formOpen]);
 
   function openForm() {
+    trackEvent("cta_click", { market });
+    trackEvent("form_open", { market });
     setFormOpen(true);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", "#zamowienie");

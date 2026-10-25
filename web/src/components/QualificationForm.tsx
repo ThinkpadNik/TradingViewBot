@@ -2,6 +2,7 @@
 
 import { useId, useState, type FormEvent } from "react";
 import type { MarketContent } from "@/lib/content";
+import { trackEvent } from "@/lib/analytics";
 
 type Props = {
   content: MarketContent;
@@ -142,6 +143,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
       setAmountLabel(data.amountLabel);
       setPaymentMethods(data.paymentMethods);
       setPreferredMethod(data.paymentMethods[0]?.id ?? "");
+      trackEvent("submit_success", { market });
       setStep(4);
     } catch {
       setError("Błąd połączenia z serwerem. Sprawdź sieć i spróbuj ponownie.");
@@ -154,6 +156,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
     if (!submissionId || isCheckingOut) return;
     setIsCheckingOut(true);
     setError(null);
+    trackEvent("checkout_start", { market });
 
     try {
       const res = await fetch("/api/checkout", {
@@ -183,6 +186,7 @@ export function QualificationForm({ content, open, onClose }: Props) {
         return;
       }
 
+      trackEvent("checkout_redirect", { market });
       window.location.assign(data.checkoutUrl);
     } catch {
       setError("Błąd połączenia przy inicjalizacji płatności.");

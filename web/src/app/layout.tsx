@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Figtree } from "next/font/google";
+import { PrivacyAnalytics } from "@/components/PrivacyAnalytics";
 import "./globals.css";
 
 const display = Fraunces({
@@ -29,6 +30,7 @@ export default function RootLayout({
     <html lang="pl">
       <body className={`${display.variable} ${body.variable} antialiased`}>
         {children}
+        <PrivacyAnalytics />
       </body>
     </html>
   );

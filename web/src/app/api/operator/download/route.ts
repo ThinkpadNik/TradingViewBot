@@ -4,7 +4,11 @@ import path from "path";
 import { NextResponse } from "next/server";
 import { Readable } from "stream";
 import { isOperatorAuthenticated } from "@/lib/operator-auth";
-import { getSubmission, getUploadsDir } from "@/lib/submissions";
+import {
+  getSubmission,
+  getUploadsDir,
+  isRemoteFile,
+} from "@/lib/submissions";
 
 export const runtime = "nodejs";
 
@@ -35,6 +39,34 @@ export async function GET(request: Request) {
     return fail("Nie znaleziono zgłoszenia.", 404);
   }
 
+  const dispositionName = submission.originalFileName.replace(/"/g, "");
+  const inline =
+    searchParams.get("inline") === "1" &&
+    (submission.mimeType.startsWith("image/") ||
+      submission.mimeType === "application/pdf");
+  const disposition = `${inline ? "inline" : "attachment"}; filename="${dispositionName}"`;
+
+  if (isRemoteFile(submission)) {
+    const remoteUrl = submission.fileUrl || submission.filePath;
+    const upstream = await fetch(remoteUrl, { cache: "no-store" });
+    if (!upstream.ok || !upstream.body) {
+      return fail("Nie udało się pobrać pliku ze storage.", 502);
+    }
+    return new NextResponse(upstream.body, {
+      status: 200,
+      headers: {
+        "Content-Type":
+          submission.mimeType ||
+          upstream.headers.get("content-type") ||
+          "application/octet-stream",
+        "Content-Disposition": disposition,
+        "Cache-Control": "private, no-store",
+        "X-Submission-Id": submission.id,
+        "X-Storage": "blob",
+      },
+    });
+  }
+
   if (!isPathInsideUploads(submission.filePath)) {
     return fail("Nieprawidłowa ścieżka pliku.", 400);
   }
@@ -49,20 +81,15 @@ export async function GET(request: Request) {
   const nodeStream = createReadStream(submission.filePath);
   const webStream = Readable.toWeb(nodeStream) as unknown as ReadableStream;
 
-  const dispositionName = submission.originalFileName.replace(/"/g, "");
-  const inline =
-    searchParams.get("inline") === "1" &&
-    (submission.mimeType.startsWith("image/") ||
-      submission.mimeType === "application/pdf");
-
   return new NextResponse(webStream, {
     status: 200,
     headers: {
       "Content-Type": submission.mimeType || "application/octet-stream",
       "Content-Length": String(fileStat.size),
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${dispositionName}"`,
+      "Content-Disposition": disposition,
       "Cache-Control": "private, no-store",
       "X-Submission-Id": submission.id,
+      "X-Storage": "local",
     },
   });
 }
