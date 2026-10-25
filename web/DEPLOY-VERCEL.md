@@ -1,0 +1,191 @@
+# Deploy Rada Pism na Vercel
+
+Aplikacja żyje w katalogu **`web/`**. W Vercel ustaw **Root Directory** = `web`.
+
+---
+
+## Punkt 1: Konfiguracja i zmienne środowiskowe
+
+**Project Settings → Environment Variables** (Production; opcjonalnie Preview).
+
+### Gotowiec do wklejenia
+
+```bash
+NEXT_PUBLIC_APP_URL=https://twoja-domena.vercel.app
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+OPERATOR_PASSWORD=silne_haslo_do_panelu_operatora
+RESEND_API_KEY=re_...
+RESEND_FROM=Rada Pism <kontakt@radapism.pl>
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
+```
+
+| Zmienna | Opis |
+|---------|------|
+| `NEXT_PUBLIC_APP_URL` | Publiczny origin (bez `/` na końcu) — success/cancel URL Stripe |
+| `STRIPE_SECRET_KEY` | `sk_live_…` lub `sk_test_…` |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` z Punktu 2 (po utworzeniu endpointu) |
+| `OPERATOR_PASSWORD` | Hasło `/operator` — nie zostawiaj domyślnego `rada-pilot` |
+| `RESEND_API_KEY` / `RESEND_FROM` | E-maile potwierdzeń |
+| `BLOB_READ_WRITE_TOKEN` | Trwały storage plików i metadanych |
+| `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` | Opcjonalny Plausible (bez cookies) |
+
+Lokalnie: `web/.env.local` (gitignore). Szablony: `.env.example`, `.env.production.example`.
+
+### Wskazówka — Vercel Blob
+
+Po dodaniu tokena **`BLOB_READ_WRITE_TOKEN`** system automatycznie przestawi się z lokalnego folderu `uploads/` na chmurę **Vercel Blob**, dzięki czemu pliki **nie znikną** przy restarcie / cold start instancji serverless.
+
+Bez tokena kod używa lokalnego FS (`uploads/` + `data/submissions.json`) — OK na `npm run dev`, **niebezpieczne na Vercel**.
+
+---
+
+## Punkt 2: Konfiguracja Stripe Dashboard (Webhook)
+
+Żeby płatności w tle automatycznie zmieniały status zgłoszenia na **`paid`** i wyzwalały **drugi e-mail** z potwierdzeniem:
+
+1. Zaloguj się do **Stripe Dashboard**.
+2. Wejdź w **Developers (Deweloperzy) → Webhooks → Add endpoint**.
+3. W polu **Endpoint URL** podaj:
+   ```
+   https://twoja-domena.vercel.app/api/webhook/stripe
+   ```
+   (podmień domenę na swoją produkcyjną / Vercel).
+4. W **Select events** zaznacz wyłącznie:
+   - `checkout.session.completed`
+5. Kliknij **Add endpoint**, skopiuj **Signing secret** (`whsec_…`).
+6. Wklej go w Vercel jako zmienną **`STRIPE_WEBHOOK_SECRET`**.
+7. Zrób **Redeploy**, żeby runtime wczytał nowy secret.
+
+### Co robi webhook w kodzie
+
+Route: `src/app/api/webhook/stripe/route.ts`
+
+- Weryfikuje podpis Stripe (`STRIPE_WEBHOOK_SECRET`)
+- Przy `checkout.session.completed` czyta `submissionId` z `metadata` / `client_reference_id`
+- Ustawia `paymentStatus: "paid"` w storage
+- Wysyła e-mail potwierdzenia płatności (Resend), jeśli `RESEND_API_KEY` jest ustawione
+
+### Test lokalny (opcjonalnie)
+
+```bash
+stripe listen --forward-to localhost:3000/api/webhook/stripe
+# wklej wypisany whsec_… do .env.local jako STRIPE_WEBHOOK_SECRET
+```
+
+---
+
+## Punkt 3: Własna domena Resend (`RESEND_FROM`)
+
+Domyślny adres nadawcy `onboarding@resend.dev` służy **wyłącznie do testów** i często wpada do spamu.  
+Przed oficjalnym startem testów na żywo skonfiguruj własną domenę:
+
+1. Wejdź w panel **Resend → Domains → Add Domain**.
+2. Wpisz swoją domenę (np. `radapism.pl`).
+3. Dodaj rekordy DNS (**DKIM**, **SPF**, **MX**) u rejestratora domeny — dokładnie jak podaje Resend.
+4. Poczekaj na status **Verified**.
+5. W Vercel zmień zmienną na produkcyjną i zrób **Redeploy**:
+   ```bash
+   RESEND_FROM=Rada Pism <kontakt@radapism.pl>
+   ```
+   (lokalnie / Preview możesz nadal używać `pilot@…` na zweryfikowanej domenie).
+
+### Uwagi
+
+- Bez `RESEND_API_KEY` API aplikacji działa, ale e-maile są pomijane (log serwerowy).
+- Kod w `src/lib/email.ts` używa `RESEND_FROM`, a gdy brak — fallback `onboarding@resend.dev` (tylko dev/test).
+- Po weryfikacji domeny wyślij testowy submit i sprawdź skrzynkę + folder spam.
+
+---
+
+## Punkt 4: Testy E2E — obie ścieżki rynkowe
+
+Wykonaj te dwa szybkie testy, żeby upewnić się, że PL i NO działają end-to-end.  
+Lokalnie: `http://localhost:3000` · na prod: `https://twoja-domena.vercel.app`.
+
+Do płatności Stripe w trybie testowym używaj karty:
+
+| Pole | Wartość |
+|------|---------|
+| Numer | `4242 4242 4242 4242` |
+| Data | dowolna przyszła |
+| CVC | `123` |
+
+(Wymaga `STRIPE_SECRET_KEY=sk_test_…`. Bez Stripe aplikacja używa **mock checkout** → `/sukces?mock=1`.)
+
+### Ścieżka Polska (`/pl` — Kosztorys OC, 99 zł)
+
+1. Wejdź na `/pl`.
+2. Kliknij CTA **„Przygotuj odwołanie — 99 zł”**, wgraj PDF/zdjęcie testowe, wpisz **prawdziwy e-mail**, wybierz pakiet **Gotowa odpowiedź (99 zł)**.
+3. Przejdź do kroku płatności, wybierz **BLIK** lub **Karta**, kliknij opłacenie.
+4. W Stripe Test Mode zapłać kartą `4242…` (jak wyżej).
+5. Sprawdź redirect na **`/sukces`** oraz e-mail Resend z numerem `sub_…`.
+6. Wejdź na **`/operator`**, zaloguj się (`OPERATOR_PASSWORD` lub domyślnie `rada-pilot`), potwierdź zgłoszenie na liście i **pobierz** wgrany plik.
+
+Oczekiwane: `amountLabel` = **99 zł**, `currency` = **PLN**, metody BLIK/Karta (`pricing.ts`).
+
+### Ścieżka Norwegia (`/no` — Inkasso, 299 NOK)
+
+1. Wejdź na `/no`.
+2. Przejdź analogiczny formularz — pakiet **Gotowa odpowiedź (299 NOK)**.
+3. Zweryfikuj w podsumowaniu kroku 4: kwota **299 NOK**, metody **Vipps / Karta** (zgodnie z `src/lib/pricing.ts`).
+4. Opłać (Stripe test lub mock) → `/sukces` → e-mail → `/operator` jak wyżej.
+
+Oczekiwane: `amountLabel` = **299 NOK**, `currency` = **NOK**.
+
+### Szybki smoke API (opcjonalnie)
+
+```bash
+# PL 99 zł
+curl -s -X POST http://localhost:3000/api/submit \
+  -F 'market=pl' -F 'packageType=response' \
+  -F 'email=test@example.com' -F 'customAnswers={}' \
+  -F 'file=@./demo.pdf;type=application/pdf'
+
+# NO 299 NOK
+curl -s -X POST http://localhost:3000/api/submit \
+  -F 'market=no' -F 'packageType=response' \
+  -F 'email=test@example.com' -F 'customAnswers={}' \
+  -F 'file=@./demo.pdf;type=application/pdf'
+```
+
+---
+
+## Deploy
+
+```bash
+cd web
+npx vercel          # preview
+npx vercel --prod   # production
+```
+
+Albo: podłącz repo w Vercel UI → Root Directory `web` → Deploy.
+
+### Checklist
+
+- [ ] Env z Punktu 1 uzupełnione (w tym Blob + Operator password)  
+- [ ] Webhook Stripe z Punktu 2 + `STRIPE_WEBHOOK_SECRET` + redeploy  
+- [ ] Domena Resend zweryfikowana (Punkt 3) + `RESEND_FROM=Rada Pism <kontakt@radapism.pl>`  
+- [ ] E2E `/pl` (99 zł) — Punkt 4  
+- [ ] E2E `/no` (299 NOK) — Punkt 4  
+- [ ] Submit zapisuje do Blob (nie ulotny dysk)  
+- [ ] Checkout → `paid` w `/operator` + pobieranie pliku  
+- [ ] E-mail po submitcie + po opłaceniu (nie z `onboarding@resend.dev`)  
+- [ ] Brak Meta/GA w HTML  
+
+---
+
+## Status pilotażu
+
+Wszystkie klocki są spięte: landing → submit → storage → checkout → webhook → e-mail → operator,  
+z ujawnieniem **AI Act** i **bez zewnętrznego trackingu** dokumentów.  
+Po Punktach 1–4 system jest gotowy do zbierania pierwszych płatnych zgłoszeń.
+
+---
+
+## Uwagi
+
+- `NEXT_PUBLIC_*` są widoczne w przeglądarce — bez sekretów.  
+- Po każdej zmianie env w Vercel → **Redeploy**.  
+- Kod nie wymaga konta klienta przed uploadem dokumentu.
