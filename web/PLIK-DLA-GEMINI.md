@@ -2,6 +2,9 @@
 
 Skopiuj ten plik do Gemini albo wskaż go w workspace.
 
+> **Pełny raport statusu + blockers go-live:** [`RAPORT-DLA-GEMINI.md`](./RAPORT-DLA-GEMINI.md)  
+> **Deploy Punkty 1–4:** [`DEPLOY-VERCEL.md`](./DEPLOY-VERCEL.md)
+
 ## Produkt
 
 Pilotaż **Smoke Test 48h** w katalogu `web/`  
