@@ -17,6 +17,16 @@ npm run dev
 
 Build produkcyjny: `npm run build && npm start`.
 
+## Deploy na Vercel (Punkt 1 — env)
+
+Pełna checklista: **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**.
+
+- W Vercel ustaw **Root Directory** = `web`
+- Skopiuj zmienne z `.env.production.example` / `.env.example` do  
+  **Project Settings → Environment Variables** (Production)
+- Po deployu dodaj Stripe webhook: `https://TWOJA-DOMENA/api/webhook/stripe`  
+  (event `checkout.session.completed` → `STRIPE_WEBHOOK_SECRET`)
+
 ## Zakres pilotażu
 
 - Above the fold: problem → karta demonstracyjna panelu AI → CTA

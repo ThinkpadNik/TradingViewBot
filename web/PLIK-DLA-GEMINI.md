@@ -151,13 +151,24 @@ web/src/components/
 
 ---
 
+## Deploy Vercel (Punkt 1)
+
+Zob. **`web/DEPLOY-VERCEL.md`** i **`web/.env.production.example`**.
+
+Root Directory w Vercel = `web`. Kluczowe env produkcyjne:
+
+- `NEXT_PUBLIC_APP_URL`, `BLOB_READ_WRITE_TOKEN` (wymagane)
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `RESEND_API_KEY`, `RESEND_FROM`
+- `OPERATOR_PASSWORD` (nie zostawiaj domyślnego `rada-pilot`)
+
 ## Sugerowany kolejny etap (jeśli brak briefu)
 
-1. Deploy na Vercel + ustawienie wszystkich env  
-2. Stripe Dashboard: webhook → `/api/webhook/stripe`  
+1. Uzupełnić sekrety w Vercel + deploy (`DEPLOY-VERCEL.md`)  
+2. Stripe webhook → `/api/webhook/stripe`  
 3. Domena Resend / własny `RESEND_FROM`  
 4. Retencja / TTL plików w Blob  
-5. Test E2E płatności NO (Vipps via Stripe) i PL (BLIK/karta)
+5. Test E2E płatności NO/PL
 
 ---
 
