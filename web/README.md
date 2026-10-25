@@ -23,9 +23,11 @@ Pełna instrukcja: **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**.
 
 1. **Env** — Root Directory `web` + zmienne z `.env.production.example`  
    (`BLOB_READ_WRITE_TOKEN` przełącza storage z `uploads/` na Vercel Blob)
-2. **Stripe webhook** — Endpoint URL  
+2. **Stripe webhook** —  
    `https://twoja-domena.vercel.app/api/webhook/stripe`  
-   event `checkout.session.completed` → Signing secret jako `STRIPE_WEBHOOK_SECRET` → Redeploy
+   event `checkout.session.completed` → `STRIPE_WEBHOOK_SECRET` → Redeploy
+3. **Resend domena** — Domains → DNS (DKIM/SPF/MX) →  
+   `RESEND_FROM=Rada Pism <kontakt@radapism.pl>` (nie `onboarding@resend.dev`)
 
 ## Zakres pilotażu
 

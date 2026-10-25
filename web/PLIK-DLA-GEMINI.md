@@ -102,7 +102,7 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 OPERATOR_PASSWORD=silne_haslo_do_panelu_operatora
 RESEND_API_KEY=re_...
-RESEND_FROM=Rada Pism <pilot@twoja-domena.pl>
+RESEND_FROM=Rada Pism <kontakt@radapism.pl>
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
 ```
@@ -163,13 +163,14 @@ Zob. **`web/DEPLOY-VERCEL.md`**.
   URL `https://twoja-domena.vercel.app/api/webhook/stripe`  
   event `checkout.session.completed` → `whsec_…` jako `STRIPE_WEBHOOK_SECRET` → Redeploy.  
   Efekt: status `paid` + drugi e-mail Resend.
+- **Punkt 3 — Resend domena:** Domains → DNS (DKIM/SPF/MX) →  
+  `RESEND_FROM=Rada Pism <kontakt@radapism.pl>` (nie używaj `onboarding@resend.dev` na żywo).
 
 ## Sugerowany kolejny etap (jeśli brak briefu)
 
-1. Uzupełnić sekrety + deploy + webhook (`DEPLOY-VERCEL.md`)  
-2. Domena Resend / własny `RESEND_FROM`  
-3. Retencja / TTL plików w Blob  
-4. Test E2E płatności NO/PL
+1. Uzupełnić sekrety + deploy + webhook + domena Resend (`DEPLOY-VERCEL.md`)  
+2. Retencja / TTL plików w Blob  
+3. Test E2E płatności NO/PL
 
 ---
 

@@ -16,7 +16,7 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 OPERATOR_PASSWORD=silne_haslo_do_panelu_operatora
 RESEND_API_KEY=re_...
-RESEND_FROM=Rada Pism <pilot@twoja-domena.pl>
+RESEND_FROM=Rada Pism <kontakt@radapism.pl>
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 NEXT_PUBLIC_PLAUSIBLE_DOMAIN=twoja-domena.pl
 ```
@@ -76,11 +76,26 @@ stripe listen --forward-to localhost:3000/api/webhook/stripe
 
 ---
 
-## Resend (e-mail)
+## Punkt 3: Własna domena Resend (`RESEND_FROM`)
 
-1. Zweryfikuj domenę nadawcy w Resend.  
-2. Ustaw `RESEND_API_KEY` + `RESEND_FROM` (np. `Rada Pism <pilot@twoja-domena.pl>`).  
-3. Bez klucza API działa, e-maile są pomijane (log serwerowy).
+Domyślny adres nadawcy `onboarding@resend.dev` służy **wyłącznie do testów** i często wpada do spamu.  
+Przed oficjalnym startem testów na żywo skonfiguruj własną domenę:
+
+1. Wejdź w panel **Resend → Domains → Add Domain**.
+2. Wpisz swoją domenę (np. `radapism.pl`).
+3. Dodaj rekordy DNS (**DKIM**, **SPF**, **MX**) u rejestratora domeny — dokładnie jak podaje Resend.
+4. Poczekaj na status **Verified**.
+5. W Vercel zmień zmienną na produkcyjną i zrób **Redeploy**:
+   ```bash
+   RESEND_FROM=Rada Pism <kontakt@radapism.pl>
+   ```
+   (lokalnie / Preview możesz nadal używać `pilot@…` na zweryfikowanej domenie).
+
+### Uwagi
+
+- Bez `RESEND_API_KEY` API aplikacji działa, ale e-maile są pomijane (log serwerowy).
+- Kod w `src/lib/email.ts` używa `RESEND_FROM`, a gdy brak — fallback `onboarding@resend.dev` (tylko dev/test).
+- Po weryfikacji domeny wyślij testowy submit i sprawdź skrzynkę + folder spam.
 
 ---
 
@@ -98,10 +113,11 @@ Albo: podłącz repo w Vercel UI → Root Directory `web` → Deploy.
 
 - [ ] Env z Punktu 1 uzupełnione (w tym Blob + Operator password)  
 - [ ] Webhook Stripe z Punktu 2 + `STRIPE_WEBHOOK_SECRET` + redeploy  
+- [ ] Domena Resend zweryfikowana (Punkt 3) + `RESEND_FROM=Rada Pism <kontakt@radapism.pl>`  
 - [ ] `/no` i `/pl` działają  
 - [ ] Submit zapisuje do Blob (nie ulotny dysk)  
 - [ ] Checkout → event `checkout.session.completed` → status `paid` w `/operator`  
-- [ ] E-mail po submitcie + po opłaceniu  
+- [ ] E-mail po submitcie + po opłaceniu (nie z `onboarding@resend.dev`)  
 - [ ] Brak Meta/GA w HTML  
 
 ---
