@@ -1,10 +1,10 @@
-# Rada Pism — kontekst dla Gemini (po ETAP 1)
+# Rada Pism — kontekst dla Gemini (po ETAP 1 + ETAP 2)
 
 Skopiuj ten plik do Gemini (lub wskaż go w workspace), gdy kontynuujesz pracę nad projektem.
 
 ## Cel produktu
 
-Pilotaż **Smoke Test 48h** — landing + formularz kwalifikacji dla dwóch niezależnych rynków:
+Pilotaż **Smoke Test 48h** — landing + formularz kwalifikacji + API zgłoszeń dla dwóch niezależnych rynków:
 
 | Rynek | Ścieżka | Oferta |
 |-------|---------|--------|
@@ -15,27 +15,34 @@ Zero obowiązku zakładania konta przed uploadem dokumentu.
 
 Marka: **Rada Pism** · „Panel AI · dokumenty z weryfikacją”.
 
+Stack: **Next.js App Router + TypeScript + Tailwind** w katalogu `web/`.
+
 ---
 
-## Co już jest zrobione (ETAP 1)
+## Co już jest zrobione
 
-Aplikacja: **Next.js (App Router) + Tailwind + TypeScript** w katalogu `web/`.
+### ETAP 1 — Landing + formularz UI
 
-### Above the fold (oba rynki — dokładnie 3 bloki)
+- Above the fold (3 bloki): problem → panel demonstracyjny AI → CTA
+- Formularz 3-krokowy po CTA / `#zamowienie`: upload → kwalifikacja (osobna NO/PL) → pakiet + kontakt
+- Przełącznik rynku w nagłówku; stopka **AI Act Art. 50**
+- Treści wyłącznie w `src/lib/content.ts` (`markets.no` / `markets.pl`)
 
-1. **Problem** — H1 + podtytuł (treści w `src/lib/content.ts`)
-2. **Dowód** — panel UI „PRZYKŁAD DEMONSTRACYJNY” (ustalenie panelu 3/3 + ostrzeżenie taktyczne)
-3. **Oferta + CTA** — przycisk ceny + nota o pilotażu / płatności
+### ETAP 2 — Backend zgłoszeń API ✅
 
-### Formularz (po kliknięciu CTA lub `#zamowienie`)
+- Route: `src/app/api/submit/route.ts`
+- `POST` + `FormData`:
+  - `market` (`no` | `pl`)
+  - `packageType` (`response` | `guardian`)
+  - `email`, `phone`
+  - `customAnswers` (JSON string)
+  - `file` (zdjęcie/PDF)
+- Brak rynku / e-maila / pliku → **400** `{ success: false, error: "..." }`
+- Sukces → **200** `{ success: true, submissionId: "sub_" + Date.now(), message: "..." }`
+- Log serwera: rynek, pakiet, nazwa pliku, rozmiar (bez treści dokumentu / e-maila)
+- `QualificationForm.tsx`: `fetch('/api/submit')`, `isSubmitting`, błędy, sukces z `submissionId`
 
-1. Upload zdjęcia/PDF + nota poufności  
-2. Kwalifikacja (inne pytania dla NO i PL)  
-3. Pakiet (Gotowa odpowiedź / Strażnik Sprawy) + e-mail + opcjonalny telefon → „Przejdź do płatności”
-
-### Stopka
-
-Ujawnienie zgodne z **AI Act Art. 50** + ścieżki publiczne (PL: Rzecznik Finansowy / MRK; NO: NAV / FinKN).
+**Brak jeszcze:** trwałego storage plików, e-maila potwierdzenia, bramki płatności.
 
 ### Uruchomienie
 
@@ -47,6 +54,15 @@ npm run build && npm start
 npm run lint     # tsc --noEmit
 ```
 
+Smoke API:
+
+```bash
+curl -s -X POST http://localhost:3000/api/submit \
+  -F 'market=no' -F 'packageType=response' \
+  -F 'email=test@example.com' -F 'customAnswers={}' \
+  -F 'file=@./jakis.pdf;type=application/pdf'
+```
+
 ---
 
 ## Mapa plików (ważne)
@@ -54,36 +70,25 @@ npm run lint     # tsc --noEmit
 ```
 web/
 ├── src/app/
-│   ├── layout.tsx          # fonty Fraunces + Figtree, metadata
-│   ├── globals.css         # tokeny CSS, atmosphere, animacje
-│   ├── page.tsx            # redirect → /no
+│   ├── layout.tsx                 # Fraunces + Figtree, metadata
+│   ├── globals.css                # tokeny CSS, atmosphere, animacje
+│   ├── page.tsx                   # redirect → /no
 │   ├── no/page.tsx
-│   └── pl/page.tsx
+│   ├── pl/page.tsx
+│   └── api/submit/route.ts        # ETAP 2 — POST FormData
 ├── src/components/
-│   ├── LandingPage.tsx     # client: CTA → otwarcie formularza
-│   ├── SiteHeader.tsx      # marka + przełącznik NO/PL
-│   ├── DemoPanel.tsx       # karta demonstracyjna
-│   ├── QualificationForm.tsx  # 3 kroki, walidacja, submit lokalny
-│   └── TrustFooter.tsx     # AI Act
-├── src/lib/content.ts      # WSZYSTKIE treści NO/PL — edytuj tu copy
+│   ├── LandingPage.tsx            # CTA → otwarcie formularza
+│   ├── SiteHeader.tsx             # marka + NO/PL
+│   ├── DemoPanel.tsx
+│   ├── QualificationForm.tsx      # 3 kroki + fetch /api/submit
+│   └── TrustFooter.tsx            # AI Act
+├── src/lib/content.ts             # WSZYSTKIE treści NO/PL
+├── PLIK-DLA-GEMINI.md             # ten plik
 ├── package.json
 └── README.md
 ```
 
-Treści rynkowe: **jeden źródłowy plik** `src/lib/content.ts` (`markets.no` / `markets.pl`). Nie duplikuj copy w komponentach.
-
-Design: fjord/ink (`--ink`, `--fjord`, `--accent`), bez fioletu / cream+terracotta / broadsheet. Motion: `animate-rise*`, `animate-panel-in`.
-
----
-
-## Zachowanie formularza (stan obecny)
-
-- Submit woła **`POST /api/submit`** (`FormData`: `market`, `packageType`, `email`, `phone`, `customAnswers` JSON, `file`).
-- Route: `src/app/api/submit/route.ts` — walidacja 400, log diagnostyczny (rynek/pakiet/nazwa/rozmiar), sukces `{ success: true, submissionId: 'sub_…', message }`.
-- Formularz: stany `isSubmitting`, błędy serwera, ekran sukcesu z `submissionId`.
-- CTA ustawia `#zamowienie` i scrolluje do sekcji.
-- Walidacja UI: brak pliku na kroku 1, puste pola kwalifikacji, niepoprawny e-mail.
-- Bramka płatności (Vipps/BLIK/karta) — nadal kolejny etap.
+Design: fjord/ink (`--ink`, `--fjord`, `--accent`). Nie zmieniaj na Inter/Roboto/fiolet/cream+terracotta.
 
 ---
 
@@ -92,25 +97,26 @@ Design: fjord/ink (`--ink`, `--fjord`, `--accent`), bez fioletu / cream+terracot
 - Nie przenoś copy poza `content.ts`.
 - Nie wymagaj konta przed uploadem.
 - Nie usuwaj ujawnienia AI Act z stopki.
-- Nie zamieniaj fontów na Inter/Roboto/Arial/system jako domyślne.
-- Repo nadrzędne ma też kod Pythona (Telegram/relay) — landing żyje w **`web/`**; nie mieszaj stacków bez powodu.
+- Nie psuj kontraktu `/api/submit` (nazwy pól FormData + kształt JSON), chyba że brief to zmienia.
+- Repo nadrzędne ma kod Pythona (Telegram/relay) — produkt Rada Pism żyje w **`web/`**.
 
 ---
 
-## Sugerowany ETAP 2+ (dla Ciebie / kolejnej sesji)
+## Sugerowany kolejny etap (ETAP 3+)
 
 Priorytet pod smoke test 48h:
 
-1. ~~**Backend zgłoszeń** — API `POST /api/submit`~~ (zrobione w ETAP 2; brak trwałego storage / e-maila potwierdzenia).
-2. **Płatności**
+1. **Płatności** po sukcesie submitu  
    - NO: Karta / Vipps  
    - PL: BLIK / Karta  
-   Po sukcesie płatności: status „opłacone” + kolejka do weryfikacji ludzkiej / panelu AI.
-3. **Panel operatora** (minimalny) — lista spraw, podgląd dokumentu, oznaczenie „wysłane w 24h”.
-4. **Analytics** — bez zewnętrznych skryptów na samym pliku dokumentu (zgodnie z obietnicą poufności); eventy tylko na CTA / płatność / konwersję.
-5. Deploy (Vercel lub inny) + domena `/no` `/pl`.
+   Redirect/checkout → status „opłacone” powiązany z `submissionId`.
+2. **Trwały storage** zgłoszeń + plików (DB / object storage) — dziś API tylko waliduje, buforuje i loguje.
+3. **E-mail potwierdzenia** do klienta (numer `submissionId`, dalsze kroki).
+4. **Panel operatora** (minimalny) — lista spraw, podgląd dokumentu, status „wysłane w 24h”.
+5. **Analytics** — eventy CTA / submit / płatność; bez zewnętrznych skryptów na samym pliku dokumentu.
+6. **Deploy** (Vercel itd.) + domena `/no` `/pl`.
 
-Jeśli użytkownik wklei konkretny brief ETAP 2 — realizuj ten brief; powyższa lista to domyślny backlog.
+Jeśli użytkownik wklei konkretny brief — realizuj ten brief; powyższe to domyślny backlog.
 
 ---
 
@@ -131,12 +137,13 @@ Jeśli użytkownik wklei konkretny brief ETAP 2 — realizuj ten brief; powyższ
 ## PR / branch
 
 - Branch: `cursor/rada-pism-landing-fa95`
-- PR (jeśli nadal otwarty): sprawdź na GitHubie repozytorium projektu PR z tytułem o Rada Pism landing NO/PL.
+- PR: landing NO/PL + API submit (tytuł wokół Rada Pism)
 
 ---
 
 ## Instrukcja startowa dla Gemini
 
-> Jesteś full-stack developerem. Projekt Rada Pism — ETAP 1 (landing + formularz) jest w `web/`.  
-> Najpierw przeczytaj `web/PLIK-DLA-GEMINI.md` i `web/src/lib/content.ts`.  
-> Potem realizuj zadanie użytkownika (zwykle ETAP 2: API zgłoszeń + płatności), bez psucia istniejącego CRO above-the-fold i bez wymogu konta przed uploadem.
+> Jesteś full-stack developerem. Projekt **Rada Pism** jest w `web/`.  
+> ETAP 1 (landing) i ETAP 2 (`POST /api/submit` + podpięty formularz) są gotowe.  
+> Najpierw przeczytaj `web/PLIK-DLA-GEMINI.md`, `web/src/lib/content.ts` oraz `web/src/app/api/submit/route.ts`.  
+> Potem realizuj zadanie użytkownika (zwykle ETAP 3: płatności Vipps/BLIK/karta + storage), bez psucia CRO above-the-fold, kontraktu API i bez wymogu konta przed uploadem.
